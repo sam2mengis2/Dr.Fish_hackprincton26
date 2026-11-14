@@ -54,18 +54,20 @@ def book_all(case: Case, rt: Runtime) -> Case:
     now = rt.clock.now()
     existing = [datetime.fromisoformat(f.appointment) for f in case.followups
                 if f.appointment and f.status in ("booked", "missed")]
-    last: datetime | None = max(existing) if existing else None
-    for fu in case.followups:
-        if fu.status not in ("open", "patient_notified") or fu.appointment:
-            continue
-        if any(k in fu.action.lower() for k in NOT_BOOKABLE):
-            continue
+    todo = sorted((fu for fu in case.followups
+                   if fu.status in ("open", "patient_notified") and not fu.appointment
+                   and not any(k in fu.action.lower() for k in NOT_BOOKABLE)), key=lambda f: f.due)
+    for fu in todo:
         due = datetime.fromisoformat(fu.due + "T17:00")
         earliest = max(now + timedelta(days=1), due - timedelta(days=7)).replace(hour=8, minute=0)
-        if last is not None:
-            earliest = max(earliest, (last + timedelta(days=1)).replace(hour=8, minute=0))
+        # Space items out after earlier bookings, but never push an item past its own due date.
+        before_due = [e for e in existing if e < due]
+        if before_due:
+            chained = (max(before_due) + timedelta(days=1)).replace(hour=8, minute=0)
+            if chained <= due:
+                earliest = max(earliest, chained)
         slot = _calendar(rt).first_free(earliest)
-        last = slot
+        existing.append(slot)
         fu.appointment = slot.isoformat(timespec="minutes")
         fu.status = "booked"
         _set_timers(case, fu.id, slot, rt)

@@ -25,6 +25,7 @@ NOT blocking (put in `suggestions` instead):
 - data that is simply not in the record (smoking history, morphology, prior imaging, labs)
 - wording, extra detail, or nice-to-have workup
 - disagreements about ordering between candidates of similar likelihood
+- an 'unrelated findings' or alternative candidate citing the findings it is trying to explain (that is correct)
 
 Return at most 3 blocking issues and at most 4 suggestions, each one sentence. If there are no blocking
 issues, return blocking=[] even if you have suggestions."""

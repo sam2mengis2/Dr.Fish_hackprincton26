@@ -54,7 +54,22 @@ class LLM:
     def text(self, role: str, system: str, user: str) -> str:
         self.calls += 1
         out = self._chat(role).invoke([("system", system), ("human", user)])
-        return out.content if isinstance(out.content, str) else str(out.content)
+        return content_text(out.content)
+
+
+def content_text(content) -> str:
+    """Newer models return a list of blocks (thinking, text, ...). Keep only the text blocks."""
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content or []:
+        if isinstance(b, str):
+            parts.append(b)
+        elif isinstance(b, dict) and b.get("type") == "text":
+            parts.append(b.get("text", ""))
+        elif getattr(b, "type", None) == "text":
+            parts.append(getattr(b, "text", ""))
+    return "\n".join(p for p in parts if p).strip()
 
 
 def make_llm(config: dict) -> LLM:

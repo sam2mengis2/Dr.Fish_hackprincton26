@@ -61,6 +61,9 @@ def main(only=None):
         case, _ = service.doctor_reply(rt, "P-002", "APPROVE")
         show(case)
         service.patient_reply(rt, "P-002", "OK")
+        for fu in rt.store.get("P-002").followups:            # December labs/ultrasound come back normal
+            if fu.status == "booked" and "chest ct" not in fu.action.lower():
+                service.record_result(rt, "P-002", fu.id, "normal")
         banner("P-002 | ...6 months later the follow-up CT arrives: FU-1 closes, nodule stable -> next interval")
         rt.clock.set("2027-05-10T09:00")
         p = Patient(**DATA["patients"]["P-002"])
@@ -84,8 +87,14 @@ def main(only=None):
         case, _ = service.doctor_reply(rt, "P-001", "APPROVE")
         show(case)
         banner("P-001 | Chest CT happens (closes FU-1); PET-CT is missed -> re-book offer -> patient reschedules")
-        ct = next(f for f in case.followups if f.action.lower().startswith("chest ct"))
-        pet = next(f for f in case.followups if "pet" in f.action.lower())
+        def find(pred):
+            return next((f for f in case.followups if f.appointment and pred(f.action.lower())), None)
+        ct = find(lambda a: ("chest ct" in a or "ct chest" in a) and "pet" not in a)
+        pet = find(lambda a: "pet" in a)
+        if not ct or not pet:
+            print("  (model chose a different plan; skipping the missed-appointment scene)")
+            ct = pet = None
+    if only in (None, "P-001") and ct and pet:
         rt.clock.set(ct.appointment)
         service.submit_scan(rt, Patient(**DATA["patients"]["P-001"]),
                             Scan(scan_id="CT-P001-1", modality="CT", body_part="CHEST", date=ct.appointment[:10],
@@ -95,6 +104,7 @@ def main(only=None):
         service.advance_clock(rt, hours=2, minutes=5)       # PET-CT missed-check fires
         service.patient_reply(rt, "P-001", "RESCHEDULE")
         show(rt.store.get("P-001"))
+    if only in (None, "P-001"):
         banner("P-001 | Patient asks a clinical question -> handed to the care team, never answered by the agent")
         service.patient_reply(rt, "P-001", "Is it cancer?")
 

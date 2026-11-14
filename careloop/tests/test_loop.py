@@ -112,3 +112,118 @@ def test_critic_suggestions_do_not_fail_review():
     c = verifier.run(c, rt)
     assert c.verifier.status == "pass"
     assert c.verifier.suggestions == ["No smoking history in the record"]
+
+
+def test_ids_with_notes_are_kept():
+    """Regression: 'F-003 (stable)' lost its ID and the Verifier failed for 'no evidence'."""
+    from careloop.schema import DxCandidate, tidy_differential
+
+    d = DxCandidate(rank=1, dx="x", evidence_for=["F-003 (stable over 6 months)", "F-001, F-002"])
+    tidy_differential([d])
+    assert d.evidence_for == ["F-003", "F-001", "F-002"]
+    assert "F-003 (stable over 6 months)" in d.caveats
+
+
+def test_text_blocks_extracted_from_thinking_output():
+    """Regression: a patient text was the raw [{'signature':..., 'thinking':...}, {'text':...}] list."""
+    from careloop.llm import content_text
+
+    blocks = [{"type": "thinking", "thinking": "", "signature": "abc"}, {"type": "text", "text": "Hi Maria"}]
+    assert content_text(blocks) == "Hi Maria"
+
+
+def test_conditional_tests_not_booked_and_dates_respected():
+    from careloop.agents import planner, scheduler
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, DxCandidate, FollowUp, Patient
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = Case(patient=Patient(patient_id="X", name="A B", age=50), urgency="routine",
+             followups=[FollowUp(id="FU-1", action="Follow-up chest CT", owner="Dr", due="2027-05-14")],
+             differential=[DxCandidate(rank=1, dx="stone", evidence_for=[], next_tests=[
+                 "Urinalysis", "Serum creatinine", "Renal ultrasound if the stone does not pass",
+                 "Review CT for hydronephrosis", "Urology consultation if obstruction"])])
+    c = planner.run(c, rt)
+    actions = [f.action for f in c.followups]
+    assert "Urinalysis" in actions and not any(" if " in a or a.startswith("Review CT") for a in actions)
+    c = scheduler.book_all(c, rt)
+    for f in c.followups:
+        if f.appointment:
+            assert f.appointment[:10] <= f.due, (f.action, f.appointment, f.due)
+
+
+def test_lab_results_close_followups_and_doctor_sees_incidentals():
+    from careloop import service
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from openhospital.tasks import P, S
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = service.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    doc = [m.text for m in c.messages if m.to == "doctor"][-1]
+    assert "lung nodule" in doc and "kidney stone" in doc        # incidental nodule is visible
+    fu = c.followups[0]
+    c = service.record_result(rt, "P-002", fu.id, "normal")
+    assert c.followup(fu.id).status == "completed"
+
+
+def test_bilateral_report_location_merges_with_model_finding():
+    """Regression: 'left frontal and right parietal' (report) vs 'left frontal' (model) didn't merge."""
+    from careloop.agents import reconciler
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, Finding, Patient
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock(), ConsoleMessenger(quiet=True))
+    c = Case(patient=Patient(patient_id="X", name="A B", age=50), raw_findings=[
+        Finding(finding="ring-enhancing brain lesion", location="left frontal lobe and right parietal lobe",
+                confidence=0.9, sources=["report_extraction"], scan_id="M1"),
+        Finding(finding="ring-enhancing brain lesion", location="left frontal lobe", confidence=0.91,
+                sources=["brain_mri_model"], scan_id="M1")])
+    c = reconciler.run(c, rt)
+    assert len(c.findings) == 1 and set(c.findings[0].sources) == {"brain_mri_model", "report_extraction"}
+    assert not c.discrepancies
+
+
+def test_needs_review_cases_are_chased():
+    """Regression: a needs-human-review case got no reminder or escalation."""
+    from careloop import service
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from openhospital.tasks import P, S
+    import tempfile
+
+    cfg = load_config()
+    cfg["pipeline"]["inject_reasoner_fault"] = True
+    cfg["pipeline"]["max_reasoner_retries"] = 0
+    rt = Runtime(cfg, CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = service.submit_scan(rt, P("P-001"), S("CXR-P001-1"))
+    assert c.state.value == "needs_human_review"
+    assert "FYI" not in [m.text for m in c.messages if m.to == "doctor"][-1]
+    service.advance_clock(rt, minutes=31)
+    c = rt.store.get("P-001")
+    assert any(m.to == "covering_doctor" for m in c.messages)
+
+
+def test_differently_worded_duplicate_tests_are_not_rebooked():
+    """Regression (real LLM): 3 biopsies and 3 chest CTs got booked across successive scans."""
+    from careloop.knowledge import test_type
+
+    biopsies = ["Bronchoscopy with biopsy", "EBUS-TBNA or CT-guided biopsy of hilar mass",
+                "CT-guided or bronchoscopic biopsy of the right hilar mass with molecular testing"]
+    cts = ["CT chest with contrast", "CT chest/abdomen with contrast", "Contrast-enhanced CT chest/abdomen/pelvis"]
+    assert {test_type(b) for b in biopsies} == {"biopsy"}
+    assert {test_type(c) for c in cts} == {"ct-chest"}
+    assert test_type("PET-CT") == "pet-ct" and test_type("Chest CT") == "ct-chest"
+
+
+def test_urgent_need_moves_pending_routine_test_earlier():
+    from careloop.agents.planner import _add
+    from careloop.schema import Case, FollowUp, Patient
+
+    c = Case(patient=Patient(patient_id="X", name="A B", age=60),
+             followups=[FollowUp(id="FU-1", action="Follow-up chest CT", owner="Dr", due="2027-05-14",
+                                 appointment="2027-05-07T09:00", status="booked")])
+    _add(c, "CT chest with contrast", "2026-11-21", "urgent", [])
+    assert len(c.followups) == 1
+    assert c.followups[0].due == "2026-11-21" and c.followups[0].appointment is None

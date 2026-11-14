@@ -35,6 +35,9 @@ SYSTEM = """You extract findings from radiology reports.
 Rules:
 - Extract EVERY abnormal finding, including incidental ones mentioned in passing.
 - Negated findings ("no pneumothorax", "without effusion") are NOT findings.
+- Extract what is SEEN (a mass, lesions, a nodule, a stone). The radiologist's interpretation or impression
+  ("concerning for metastatic disease", "consistent with infection", "likely benign") is NOT a separate finding;
+  never create a finding named after a diagnosis.
 - report_quote must be copied verbatim from the report, one sentence.
 - Convert cm to mm. Mark hedged=true for 'possible', 'cannot exclude', 'may represent', 'suspicious for'.
 - Put any follow-up recommendation the radiologist gives in `recommendation`."""

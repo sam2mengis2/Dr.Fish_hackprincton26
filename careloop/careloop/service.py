@@ -38,6 +38,23 @@ def patient_reply(rt: Runtime, patient_id: str, text: str) -> tuple[Case, str]:
     return case, outcome
 
 
+def record_result(rt: Runtime, patient_id: str, followup_id: str, note: str = "") -> Case:
+    """A non-imaging result arrived (lab value, consult note): close that follow-up item.
+    Imaging follow-ups are closed by submit_scan when the actual scan arrives."""
+    case = _get(rt, patient_id)
+    fu = case.followup(followup_id)
+    if fu is None:
+        raise KeyError(f"no follow-up {followup_id} for {patient_id}")
+    fu.status = "completed"
+    fu.completed_by_scan = f"result:{note or fu.action}"
+    for t in case.timers:
+        if t.ref == fu.id:
+            t.done = True
+    case.log("results", f"{fu.id} '{fu.action}' completed by result {note!r}", rt.clock.iso())
+    rt.store.save(case)
+    return case
+
+
 def advance_clock(rt: Runtime, **delta) -> list[Case]:
     """Fast-forward the simulated clock and let the Watchdog fire every due timer."""
     rt.clock.advance(**delta)
@@ -59,7 +76,7 @@ def _activate(case: Case, rt: Runtime) -> Case:
         if new_bookings or case.message_tier == "serious" or not told_serious:
             case = patient_comms.notify(case, rt)
     if case.message_tier == "serious":
-        booked = new_bookings
+        booked = sorted(new_bookings, key=lambda f: f.appointment)
         if booked:
             parts = []
             for f in booked:

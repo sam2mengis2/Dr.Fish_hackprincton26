@@ -14,7 +14,10 @@ LINKABLE = {"lung nodule": {"lung nodule", "lung mass"}, "lung mass": {"lung nod
 
 def _side(loc: str) -> str:
     loc = loc.lower()
-    return "right" if "right" in loc else "left" if "left" in loc else ""
+    has_r, has_l = "right" in loc, "left" in loc
+    if (has_r and has_l) or "bilateral" in loc:
+        return ""  # multiple sides: compatible with either ("left frontal and right parietal")
+    return "right" if has_r else "left" if has_l else ""
 
 
 def _same(a: Finding, b: Finding) -> bool:

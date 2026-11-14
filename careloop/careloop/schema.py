@@ -188,6 +188,7 @@ class Case(BaseModel):
 
 
 _FID = __import__("re").compile(r"^F-\d{3,}$")
+_FID_ANY = __import__("re").compile(r"\bF-\d{3,}\b")
 
 
 def tidy_differential(cands: list["DxCandidate"]) -> list["DxCandidate"]:
@@ -198,7 +199,11 @@ def tidy_differential(cands: list["DxCandidate"]) -> list["DxCandidate"]:
         for field in ("evidence_for", "evidence_against"):
             ids, prose = [], []
             for x in getattr(d, field):
-                (ids if _FID.match(x.strip()) else prose).append(x.strip())
+                found = _FID_ANY.findall(x)
+                ids.extend(i for i in found if i not in ids)
+                rest = _FID_ANY.sub("", x).strip(" ,;:-()[]")
+                if rest:
+                    prose.append(x.strip())
             setattr(d, field, ids)
             d.caveats.extend(prose)
     return cands

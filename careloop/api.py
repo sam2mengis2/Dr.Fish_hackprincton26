@@ -89,6 +89,22 @@ def reply_patient(body: ReplyIn):
     return {"outcome": outcome, "state": c.state}
 
 
+class ResultIn(BaseModel):
+    patient_id: str
+    followup_id: str
+    note: str = ""
+
+
+@app.post("/results")
+def post_result(body: ResultIn):
+    """Lab / consult result arrived -> closes that follow-up (imaging closes via POST /scans)."""
+    try:
+        c = service.record_result(rt, body.patient_id, body.followup_id, body.note)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    return {"state": c.state, "followups": [(f.id, f.status) for f in c.followups]}
+
+
 @app.post("/clock/advance")
 def advance(body: ClockIn):
     service.advance_clock(rt, minutes=body.minutes, hours=body.hours, days=body.days)

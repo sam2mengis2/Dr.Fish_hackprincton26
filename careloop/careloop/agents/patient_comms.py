@@ -47,7 +47,8 @@ def notify(case: Case, rt: Runtime) -> Case:
                                                   "End with: Reply OK to confirm or RESCHEDULE.")
             # Must keep every booked date; otherwise use the template (it always states them).
             dates = [fu.appointment[:10] for fu in items if fu.appointment]
-            text = _safe(draft, fallback) if all(d in draft for d in dates) else fallback
+            looks_raw = (not draft) or draft.lstrip().startswith(("[", "{")) or "signature" in draft
+            text = fallback if looks_raw or not all(d in draft for d in dates) else _safe(draft, fallback)
         else:
             text = fallback
     text = _safe(text, f"Hi {_first_name(case)}, {doc} will contact you about your recent scan. - your care team")

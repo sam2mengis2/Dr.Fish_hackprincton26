@@ -23,11 +23,14 @@ Rules:
 3. Explicitly consider that findings may be UNRELATED; if so, include a candidate saying so.
 4. Do not lean on findings with confidence below {floor} unless you say they are weak.
 5. If the findings do not support any conclusion, set insufficient_info=true.
-6. next_tests: the tests that would confirm or rule out each candidate.
+6. next_tests: at most 3 concrete, orderable tests that would confirm or rule out the candidate (e.g. 'Urinalysis',
+   'PET-CT'). No conditional items ('X if Y') and no tasks for the radiologist; put contingencies in caveats.
+   Only suggest tests that are NOT already in the current follow-up plan.
 7. The same lesion seen on several scans (marked 'same lesion as') is ONE observation: cite the most recent ID
    and describe the change over time in caveats. Never cite a finding for a claim about a different organ.
 8. Prefer specific diagnoses. If findings in different organ systems have no plausible shared cause, say so in
    caveats and give per-finding candidates; add an explicit 'unrelated' candidate only when you also propose a link.
+   An 'unrelated findings' candidate lists the findings it covers in evidence_for (they are what it explains).
 9. Data that is not in the record (smoking, morphology, prior imaging) goes in caveats; set likelihood from the
    evidence that IS present.
 This is decision support for a doctor, not a diagnosis."""
@@ -52,6 +55,10 @@ def timeline(case: Case) -> str:
             extra.append(f"same lesion as {f.linked_to}, growth {f.growth_mm} mm")
         lines.append(f"- {f.date} {f.finding_id}: {f.finding} {f.location} ({', '.join(extra)}) "
                      f"conf={f.confidence} sources={'+'.join(f.sources)} scan={f.scan_id}")
+    open_items = [fu for fu in case.followups if fu.status != "completed"]
+    if open_items:
+        lines.append("Current follow-up plan (already ordered; do NOT re-suggest these or equivalents):")
+        lines += [f"- {fu.action} ({fu.status}, due {fu.due})" for fu in open_items]
     return "\n".join(lines)
 
 

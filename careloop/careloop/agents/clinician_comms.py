@@ -27,13 +27,24 @@ def compose(case: Case) -> str:
         fs = ", ".join(f"{case.finding(i).finding} ({i})" for i in case.urgency_reasons if case.finding(i))
         body = f"CRITICAL finding: {fs}."
     else:
-        fs = "; ".join(f"{f.finding} {f.location} ({f.finding_id})".replace("  ", " ")
-                       for f in case.findings if f.finding_id in (case.differential[0].evidence_for if case.differential else []))
+        latest = max((s.date for s in case.scans), default="")
+        new = [f for f in case.findings if f.date == latest]
+
+        def _desc(f):
+            d = f"{f.finding} {f.location}".strip()
+            if f.size_mm:
+                d += f" {f.size_mm:g} mm"
+            if f.linked_to:
+                ch = f.growth_mm
+                d += f", same lesion as {f.linked_to}" + (f" ({ch:+g} mm)" if ch is not None else "")
+            return f"{d} ({f.finding_id})"
+
+        fs = "; ".join(_desc(f) for f in new)
         top = case.differential[0].dx if case.differential else "insufficient information"
-        body = f"Findings: {fs or 'see dashboard'}.\nTop possibility: {top}."
+        body = f"New on this scan: {fs or 'see dashboard'}.\nTop possibility: {top}."
         if case.verifier.suggestions:
             body += f"\n({len(case.verifier.suggestions)} reviewer note(s) on the dashboard.)"
-    if case.plan_summary == "No new follow-up needed":
+    if case.plan_summary == "No new follow-up needed" and case.state != CaseState.NEEDS_HUMAN_REVIEW:
         return f"{head} | FYI\n{body}\nNo new actions suggested; existing plan continues.\nReply APPROVE to acknowledge, or EDIT <note>."
     actions = f"\nSuggested: {case.plan_summary}." if case.plan_summary else ""
     return f"{head}\n{body}{actions}\nReply APPROVE, EDIT <note>, REJECT <reason>, or CALL."

@@ -29,10 +29,11 @@ def tick(case: Case, rt: Runtime) -> Case:
             continue
         t.done = True
         fu = case.followup(t.ref) if t.ref else None
-        if t.kind == "approval_reminder" and case.state == CaseState.AWAITING_APPROVAL:
+        waiting = case.state in (CaseState.AWAITING_APPROVAL, CaseState.NEEDS_HUMAN_REVIEW)
+        if t.kind == "approval_reminder" and waiting:
             _say(case, rt, "doctor", f"Reminder: CareLoop plan for {pid} is awaiting your reply (APPROVE / EDIT / REJECT / CALL).")
             case.log("watchdog", "approval reminder sent", rt.clock.iso())
-        elif t.kind == "approval_escalate" and case.state == CaseState.AWAITING_APPROVAL:
+        elif t.kind == "approval_escalate" and waiting:
             case.state = CaseState.ESCALATED
             _say(case, rt, "covering_doctor", f"ESCALATION: {case.patient.ordering_doctor} has not responded about {pid} "
                                               f"({case.urgency}). Please review: {case.plan_summary}")

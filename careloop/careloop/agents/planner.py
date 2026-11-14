@@ -5,13 +5,28 @@ rule that produced the date. Intervals come ONLY from knowledge.py, never an LLM
 """
 from __future__ import annotations
 
-from ..knowledge import SERIOUS_WORDS, days_for_urgency, due_from, is_high_risk_lung, lung_nodule_rule
+from ..knowledge import SERIOUS_WORDS, test_type, days_for_urgency, due_from, is_high_risk_lung, lung_nodule_rule
+import re
+
 from ..runtime import Runtime
+
+CONDITIONAL = re.compile(r"\b(if|when|should|consider|unless|as needed|prn)\b|\breview (ct|imaging|images)\b", re.I)
 from ..schema import Case, CaseState, FollowUp
 
 
 def _add(case: Case, action: str, due: str, rule: str, fids: list[str]) -> None:
-    if any(fu.action.lower() == action.lower() and fu.status != "completed" for fu in case.followups):
+    kind = test_type(action)
+    pending = [fu for fu in case.followups if test_type(fu.action) == kind and fu.status != "completed"]
+    if pending:
+        fu = pending[0]
+        if due < fu.due:  # same test now needed sooner: move the existing item earlier and rebook it
+            fu.due, fu.rule, fu.appointment, fu.status = due, rule + f" (moved earlier from {fu.due})", None, "open"
+            for t in case.timers:
+                if t.ref == fu.id:
+                    t.done = True
+            case.log("planner", f"{fu.id} '{fu.action}' moved earlier to {due} ({kind} needed sooner)", "")
+        else:
+            case.log("planner", f"skipped '{action}': a {kind} test is already pending ({fu.id})", "")
         return
     fu_id = f"FU-{len(case.followups) + 1}"
     owner = case.patient.ordering_doctor
@@ -41,11 +56,15 @@ def run(case: Case, rt: Runtime) -> Case:
                 _add(case, r[0], r[1], r[2], [f.finding_id])
     # Next tests of the top candidate
     if case.differential and case.urgency != "critical" and not review:
-        top = case.differential[0]
+        new_ids = {f.finding_id for f in new_scan_findings}
+        # Prefer the highest-ranked candidate that explains a finding from the newest scan, so a
+        # follow-up scan for the nodule doesn't restart workup for an older, unrelated problem.
+        top = next((d for d in case.differential if set(d.evidence_for) & new_ids), case.differential[0])
         days = days_for_urgency(case.urgency or "routine")
-        for t in top.next_tests:
-            if "per guideline" in t.lower():
-                continue
+        concrete = [t for t in top.next_tests
+                    if "per guideline" not in t.lower()
+                    and not CONDITIONAL.search(t)]  # "X if Y" is a contingency, not an appointment
+        for t in concrete[:3]:
             _add(case, t, due_from(today, days), f"Top candidate next test; {case.urgency} -> within {days} days",
                  top.evidence_for)
 

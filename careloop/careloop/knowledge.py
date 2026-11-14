@@ -129,6 +129,27 @@ def lung_nodule_rule(size_mm: float, high_risk: bool, scan_date: str,
             "Fleischner 2017 (simplified): solid >8 mm -> consider CT at 3 months, PET-CT or sampling")
 
 
+_TEST_TYPES = [
+    ("biopsy", re.compile(r"biops|ebus|tbna|bronchoscop|tissue sampling|fine.needle|\bfna\b", re.I)),
+    ("pet-ct", re.compile(r"\bpet\b", re.I)),
+    ("ct-chest", re.compile(r"(\bct\b|computed tomography).*(chest|thorax)|(chest|thorax).*\bct\b", re.I)),
+    ("mri-brain", re.compile(r"\bmri\b.*brain|brain.*\bmri\b", re.I)),
+    ("oncology", re.compile(r"oncolog", re.I)),
+    ("echo", re.compile(r"echocardiogra", re.I)),
+    ("urinalysis", re.compile(r"urinalysis|\bua\b", re.I)),
+    ("renal-function", re.compile(r"creatinine|metabolic panel|\bbmp\b|renal function", re.I)),
+]
+
+
+def test_type(action: str) -> str:
+    """Coarse test category so 'CT chest/abdomen with contrast' and 'Contrast-enhanced CT chest' count as
+    the same pending test. Falls back to the lowercased text for anything uncategorized."""
+    for key, rx in _TEST_TYPES:
+        if rx.search(action):
+            return key
+    return action.strip().lower()
+
+
 def days_for_urgency(level: str) -> int:
     return {"critical": 1, "urgent": 7, "routine": 30, "incidental": 180}.get(level, 30)
 

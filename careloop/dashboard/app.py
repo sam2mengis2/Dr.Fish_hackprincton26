@@ -108,6 +108,14 @@ with left:
                    "Status": f["status"], "Appointment": f["appointment"], "Rule": f["rule"]}
                   for f in case["followups"]], hide_index=True, width='stretch')
 
+    open_items = [f for f in case["followups"] if f["status"] not in ("completed",)]
+    if open_items:
+        with st.form("result"):
+            pick = st.selectbox("Result received for", [f"{f['id']} - {f['action']}" for f in open_items])
+            note = st.text_input("Result note", "normal")
+            if st.form_submit_button("Record result"):
+                post("/results", {"patient_id": pid, "followup_id": pick.split(" - ")[0], "note": note}); st.rerun()
+
 with right:
     st.subheader("Doctor's phone")
     for m in [m for m in case["messages"] if m["to"] in ("doctor", "covering_doctor")][-6:]:
