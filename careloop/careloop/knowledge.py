@@ -134,7 +134,9 @@ _TEST_TYPES = [
     ("pet-ct", re.compile(r"\bpet\b", re.I)),
     ("ct-chest", re.compile(r"(\bct\b|computed tomography).*(chest|thorax)|(chest|thorax).*\bct\b", re.I)),
     ("mri-brain", re.compile(r"\bmri\b.*brain|brain.*\bmri\b", re.I)),
+    ("radiation-oncology", re.compile(r"radiation oncolog|radiotherap|radiosurg|\bsrs\b", re.I)),
     ("oncology", re.compile(r"oncolog", re.I)),
+    ("neurosurgery", re.compile(r"neurosurg", re.I)),
     ("echo", re.compile(r"echocardiogra", re.I)),
     ("urinalysis", re.compile(r"urinalysis|\bua\b", re.I)),
     ("renal-function", re.compile(r"creatinine|metabolic panel|\bbmp\b|renal function", re.I)),
@@ -148,6 +150,25 @@ def test_type(action: str) -> str:
         if rx.search(action):
             return key
     return action.strip().lower()
+
+
+_COMMENTARY = re.compile(
+    r"\s*\((?=[^)]*(coded|judg|decision|clinician|optional|if indicated|per mdt|per team))[^)]*\)"
+    r"|\s*[-\u2013\u2014]\s*(clinician|physician|team|mdt)[^,;]*(decision|discretion|judg\w*)\s*$", re.I)
+CLINICIAN_TASK = re.compile(
+    r"\b(confirm|verify|check whether|review|discuss|input|consult with|tumou?r board|multidisciplinary|\bmdt\b|"
+    r"correlat\w*|compare with prior)\b", re.I)
+
+
+def clean_action(action: str) -> str:
+    """Strip the model's commentary from a test name: '(timeframe is clinical judgment, not a coded rule)',
+    '- clinician decision'. What's left is what goes on the plan and the calendar."""
+    return re.sub(r"\s{2,}", " ", _COMMENTARY.sub("", action)).strip(" -,;")
+
+
+def is_clinician_task(action: str) -> bool:
+    """Work for the care team (confirm/review/discuss/MDT), not an appointment the patient attends."""
+    return bool(CLINICIAN_TASK.search(action))
 
 
 def days_for_urgency(level: str) -> int:
@@ -167,7 +188,7 @@ SERIOUS_WORDS = re.compile(
 def patient_label(action: str) -> str:
     """Patient-facing name for a follow-up. Use this in EVERY patient text (reminders, missed, rebook)."""
     a = action.lower()
-    if "oncolog" in a:
+    if "oncolog" in a or "referral" in a or "consult" in a or "neurosurg" in a:
         return "specialist appointment"
     if re.search(r"biops|sampling|ebus|tbna|bronchoscop", a):
         return "procedure"

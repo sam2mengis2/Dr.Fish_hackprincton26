@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from ..knowledge import SERIOUS_WORDS, patient_label
+from ..knowledge import SERIOUS_WORDS, is_clinician_task, patient_label
 from ..llm import maybe
 from ..runtime import Runtime
 from ..schema import Case, Message
@@ -34,7 +34,7 @@ def notify(case: Case, rt: Runtime) -> Case:
     if case.message_tier == "serious":
         text = f"Hi {_first_name(case)}, {doc} reviewed your recent scans and will call you today to talk about next steps. - your care team"
     else:
-        items = [fu for fu in case.followups if fu.status in ("open", "booked")]
+        items = [fu for fu in case.followups if fu.status in ("open", "booked") and not is_clinician_task(fu.action)]
         plan = "; ".join(f"{patient_label(fu.action)} on {fu.appointment.replace('T', ' at ') if fu.appointment else 'a date we will confirm'}"
                          for fu in items) or "no further tests"
         fallback = (f"Hi {_first_name(case)}, {doc} reviewed your scan. A routine follow-up is recommended: {plan}. "

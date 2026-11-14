@@ -5,7 +5,7 @@ rule that produced the date. Intervals come ONLY from knowledge.py, never an LLM
 """
 from __future__ import annotations
 
-from ..knowledge import SERIOUS_WORDS, test_type, days_for_urgency, due_from, is_high_risk_lung, lung_nodule_rule
+from ..knowledge import SERIOUS_WORDS, clean_action, is_clinician_task, test_type, days_for_urgency, due_from, is_high_risk_lung, lung_nodule_rule
 import re
 
 from ..runtime import Runtime
@@ -15,6 +15,9 @@ from ..schema import Case, CaseState, FollowUp
 
 
 def _add(case: Case, action: str, due: str, rule: str, fids: list[str]) -> None:
+    action = clean_action(action)
+    if is_clinician_task(action):
+        rule = rule + " | clinician task (not booked, not sent to patient)"
     kind = test_type(action)
     pending = [fu for fu in case.followups if test_type(fu.action) == kind and fu.status != "completed"]
     if pending:
@@ -32,6 +35,8 @@ def _add(case: Case, action: str, due: str, rule: str, fids: list[str]) -> None:
     owner = case.patient.ordering_doctor
     if "oncology" in action.lower():
         owner = "Oncology team"
+    if is_clinician_task(action):
+        owner = case.patient.ordering_doctor
     case.followups.append(FollowUp(id=fu_id, action=action, owner=owner, due=due, rule=rule, finding_ids=fids))
 
 

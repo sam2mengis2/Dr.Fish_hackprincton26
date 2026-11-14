@@ -54,8 +54,14 @@ def run(case: Case, rt: Runtime) -> Case:
         if prior:
             p = prior[-1]
             f.linked_to = p.finding_id
-            if p.size_mm and f.size_mm:
+            mod = {s.scan_id: s.modality.upper() for s in case.scans}
+            comparable = mod.get(p.scan_id) == mod.get(f.scan_id) or \
+                {mod.get(p.scan_id), mod.get(f.scan_id)} <= {"CR", "DX"}
+            if p.size_mm and f.size_mm and comparable:
                 f.growth_mm = round(f.size_mm - p.size_mm, 1)
+            elif p.size_mm and f.size_mm:
+                case.log("reconciler", f"{f.finding_id} vs {p.finding_id}: sizes from different modalities "
+                                       f"({mod.get(p.scan_id)} vs {mod.get(f.scan_id)}); growth not computed", now)
         case.findings.append(f)
 
     for m in model_only:

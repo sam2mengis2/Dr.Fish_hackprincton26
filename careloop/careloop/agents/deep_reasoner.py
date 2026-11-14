@@ -17,7 +17,7 @@ from typing import Any, Optional
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, ValidationError
 
-from ..knowledge import is_high_risk_lung, lung_nodule_rule, urgency_for
+from ..knowledge import is_high_risk_lung, lung_nodule_rule, normalize, urgency_for
 from ..runtime import Runtime
 from ..schema import Case, CaseState, DxCandidate
 from .reasoner import timeline
@@ -29,7 +29,8 @@ Your job: connect a patient's imaging findings (across ALL their scans) and hist
 3-5 ranked POSSIBLE diagnoses with cited evidence.
 
 Work like this:
-1. Use write_todos to plan your investigation before anything else.
+1. Use write_todos to plan your investigation before anything else, and call write_todos again to mark each
+   item completed as you finish it (the physician sees this plan).
 2. Call get_timeline, then inspect important findings with get_finding and compare_with_prior.
 3. Use get_patient_history for risk factors.
 4. Ask the `radiology-critic` subagent (via the task tool) to challenge your draft ranking,
@@ -44,7 +45,9 @@ Hard rules:
 - Do not rely on findings with confidence below {floor} unless you label them weak.
 - If the evidence supports nothing, submit with insufficient_info=true and an empty list.
 - The same lesion across scans ('same lesion as') is one observation: cite the latest ID, note the change in caveats.
-- Data missing from the record goes in caveats; it is not a reason to keep investigating forever."""
+- Data missing from the record goes in caveats; it is not a reason to keep investigating forever.
+- next_tests are plain names of tests the patient attends. Scheduling is decided by code, so never add
+  notes like 'clinician decision' or 'not a coded rule' to them."""
 
 CRITIC_PROMPT = """You are a skeptical attending radiologist. You receive a draft differential.
 Use the tools to check the cited findings. Reply with at most 3 BLOCKING problems (evidence that doesn't
@@ -64,7 +67,10 @@ class SubmittedDx(BaseModel):
     evidence_against: list[str] = Field(default_factory=list, description="Finding IDs ONLY. No prose.")
     caveats: list[str] = Field(default_factory=list, description="Reasons, missing data, uncertainties (prose here).")
     rationale: str = ""
-    next_tests: list[str] = Field(default_factory=list)
+    next_tests: list[str] = Field(default_factory=list, description=(
+        "At most 3 concrete tests or visits the PATIENT attends (e.g. 'PET-CT', 'EBUS biopsy', 'Oncology referral'). "
+        "Plain names only: no commentary about rules, timeframes or who decides, and no tasks for clinicians "
+        "or radiologists (confirm/review/discuss) - put those in caveats."))
 
 
 def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
@@ -113,8 +119,9 @@ def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
     def lookup_guideline(finding: str, size_mm: Optional[float] = None) -> str:
         """Look up CareLoop's coded follow-up rule and urgency level for a finding type and size."""
         _trace(f"lookup_guideline({finding}, {size_mm})")
+        finding = normalize(finding)  # 'hilar mass' and 'lung mass' must get the same answer
         lvl = urgency_for(finding, size_mm, 0.9, True)
-        out = {"urgency_level": lvl}
+        out = {"normalized_finding": finding, "urgency_level": lvl}
         if finding == "lung nodule" and size_mm:
             r = lung_nodule_rule(size_mm, is_high_risk_lung(case.patient.history, case.patient.age),
                                  rt.clock.now().date().isoformat())

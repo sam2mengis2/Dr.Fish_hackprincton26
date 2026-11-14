@@ -257,3 +257,57 @@ def test_patient_label_names_tests_plainly():
     assert patient_label("MRI brain with and without gadolinium (dedicated metastasis protocol)") == \
         "MRI brain with and without gadolinium"
     assert patient_label("Bronchoscopy with biopsy (EBUS-TBNA)") == "procedure"
+
+
+def test_deep_agent_commentary_and_clinician_tasks():
+    """Regression (Deep Agent, real model): a radiologist task was booked and texted to the patient."""
+    from careloop.knowledge import clean_action, is_clinician_task
+
+    assert clean_action("Tissue biopsy (EBUS or CT-guided) - clinician decision") == "Tissue biopsy (EBUS or CT-guided)"
+    assert clean_action("Multidisciplinary/pulmonology referral (timeframe is clinical judgment, not a coded rule)") \
+        == "Multidisciplinary/pulmonology referral"
+    assert is_clinician_task("Confirm whether the completed MRI included DWI/ADC and SWI")
+    assert is_clinician_task("Neurosurgery/radiation oncology input via the MDT")
+    assert not is_clinician_task("PET-CT") and not is_clinician_task("Tissue biopsy (EBUS or CT-guided)")
+
+
+def test_clinician_tasks_not_booked_or_texted():
+    from careloop.agents import planner, scheduler
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, DxCandidate, Patient
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = Case(patient=Patient(patient_id="X", name="A B", age=60), urgency="urgent",
+             differential=[DxCandidate(rank=1, dx="x", evidence_for=[], next_tests=[
+                 "PET-CT", "Confirm whether the completed MRI included DWI/ADC and SWI"])])
+    c = scheduler.book_all(planner.run(c, rt), rt)
+    task = next(f for f in c.followups if f.action.startswith("Confirm"))
+    assert task.appointment is None and "clinician task" in task.rule
+    assert next(f for f in c.followups if f.action == "PET-CT").appointment
+
+
+def test_growth_not_computed_across_modalities():
+    """Regression (found by the Deep Agent): 32 mm on X-ray vs 34 mm on CT is not 'growth'."""
+    from careloop.agents import reconciler
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, Finding, Patient, Scan
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock(), ConsoleMessenger(quiet=True))
+    c = Case(patient=Patient(patient_id="X", name="A B", age=60),
+             scans=[Scan(scan_id="CXR", modality="CR", body_part="CHEST", date="2026-10-30"),
+                    Scan(scan_id="CT", modality="CT", body_part="CHEST", date="2026-11-16")],
+             findings=[Finding(finding_id="F-001", finding="lung mass", location="right hilum", size_mm=32,
+                               scan_id="CXR", sources=["report_extraction"])],
+             raw_findings=[Finding(finding="lung mass", location="right hilum", size_mm=34, scan_id="CT",
+                                   sources=["report_extraction"])])
+    c = reconciler.run(c, rt)
+    new = c.findings[-1]
+    assert new.linked_to == "F-001" and new.growth_mm is None
+
+
+def test_specialist_types_and_labels():
+    from careloop.knowledge import patient_label, test_type
+    assert test_type("Radiation oncology referral") != test_type("Oncology referral")
+    assert patient_label("Neurosurgery referral") == "specialist appointment"

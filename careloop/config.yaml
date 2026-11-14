@@ -4,10 +4,10 @@
 # provider: mock  -> deterministic rule-based stand-ins, no API key needed
 # provider: anthropic | openai | any provider supported by langchain's init_chat_model
 llm:
-  provider: mock
+  provider: anthropic
   # reasoner_backend: auto      -> mock rules (provider: mock) or one structured LLM call
   # reasoner_backend: deepagent -> LangChain Deep Agent "Diagnostic Investigator" (needs a real provider)
-  reasoner_backend: auto
+  reasoner_backend: deepagent
   extractor_model: claude-sonnet-5-5        # used when provider != mock
   reasoner_model: claude-sonnet-5-5
   verifier_model: claude-haiku-5-5          # ideally a DIFFERENT model than the reasoner

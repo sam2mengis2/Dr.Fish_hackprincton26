@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 
-from ..knowledge import patient_label
+from ..knowledge import is_clinician_task, patient_label
 from ..runtime import Runtime
 from ..schema import Case, Timer
 
@@ -56,7 +56,8 @@ def book_all(case: Case, rt: Runtime) -> Case:
                 if f.appointment and f.status in ("booked", "missed")]
     todo = sorted((fu for fu in case.followups
                    if fu.status in ("open", "patient_notified") and not fu.appointment
-                   and not any(k in fu.action.lower() for k in NOT_BOOKABLE)), key=lambda f: f.due)
+                   and not any(k in fu.action.lower() for k in NOT_BOOKABLE)
+                   and not is_clinician_task(fu.action)), key=lambda f: f.due)
     for fu in todo:
         due = datetime.fromisoformat(fu.due + "T17:00")
         earliest = max(now + timedelta(days=1), due - timedelta(days=7)).replace(hour=8, minute=0)
