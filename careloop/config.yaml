@@ -1,0 +1,54 @@
+# CareLoop config. OpenHospital runs read the same file, so one edit = one experiment.
+
+# --- LLM -------------------------------------------------------------------
+# provider: mock  -> deterministic rule-based stand-ins, no API key needed
+# provider: anthropic | openai | any provider supported by langchain's init_chat_model
+llm:
+  provider: mock
+  # reasoner_backend: auto      -> mock rules (provider: mock) or one structured LLM call
+  # reasoner_backend: deepagent -> LangChain Deep Agent "Diagnostic Investigator" (needs a real provider)
+  reasoner_backend: auto
+  extractor_model: claude-sonnet-5-5        # used when provider != mock
+  reasoner_model: claude-sonnet-5-5
+  verifier_model: claude-haiku-5-5          # ideally a DIFFERENT model than the reasoner
+  comms_model: claude-haiku-5-5
+  temperature: 0.2
+
+# --- Computer vision ---------------------------------------------------------
+cv:
+  cxr_backend: mock          # mock | torchxrayvision
+  cxr_weights: densenet121-res224-all
+  # Per-finding thresholds; tune on a validation set (OpenHospital prints sensitivity per finding).
+  cxr_thresholds:
+    Pneumothorax: 0.55
+    Mass: 0.5
+    Nodule: 0.5
+    Effusion: 0.6
+    Consolidation: 0.6
+    Cardiomegaly: 0.6
+    default: 0.6
+  brain_mri_backend: mock    # mock | tsionvision (stretch goal)
+
+# --- Pipeline ----------------------------------------------------------------
+pipeline:
+  verifier_enabled: true
+  max_reasoner_retries: 2
+  confidence_floor: 0.5      # findings below this can't carry a diagnosis alone
+  deep_agent_recursion_limit: 60
+
+# --- Comms / timers (simulated clock) ------------------------------------------
+timers:
+  urgent_reminder_min: 15
+  urgent_escalate_min: 30
+  routine_reminder_min: 120
+  routine_escalate_min: 240
+  appt_reminder_days_before: [3, 1]
+  rebook_escalate_hours: 24
+
+messenger: console           # console | photon
+phone_book:
+  doctor: "+1XXXXXXXXXX"
+  patient: "+1XXXXXXXXXX"
+
+store_dir: runs/cases
+clock_start: "2026-11-14T09:00"

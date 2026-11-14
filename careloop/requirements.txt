@@ -1,0 +1,21 @@
+# core (mock mode runs with just these)
+pydantic>=2.7
+langgraph>=1.0
+pyyaml
+fastapi
+uvicorn
+httpx
+streamlit
+pytest
+
+# real LLM mode + Deep Agent reasoner
+langchain>=1.0
+langchain-anthropic        # or langchain-openai
+deepagents>=0.7
+
+# real chest X-ray model (turn on cv.cxr_backend: torchxrayvision)
+# torch
+# torchvision
+# torchxrayvision
+# scikit-image
+# pydicom
