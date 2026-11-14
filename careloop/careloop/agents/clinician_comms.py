@@ -40,7 +40,10 @@ def compose(case: Case) -> str:
             return f"{d} ({f.finding_id})"
 
         fs = "; ".join(_desc(f) for f in new)
-        top = case.differential[0].dx if case.differential else "insufficient information"
+        new_ids = {f.finding_id for f in new}
+        best = next((d for d in case.differential if set(d.evidence_for) & new_ids),
+                    case.differential[0] if case.differential else None)
+        top = best.dx if best else "insufficient information"
         body = f"New on this scan: {fs or 'see dashboard'}.\nTop possibility: {top}."
         if case.verifier.suggestions:
             body += f"\n({len(case.verifier.suggestions)} reviewer note(s) on the dashboard.)"

@@ -125,10 +125,16 @@ def _mock_reason(case: Case, rt: Runtime) -> ReasonerOut:
                          evidence_for=[f.finding_id], next_tests=["Clinician review"], rationale="Single finding.")
              for i, f in enumerate(conf[:4])]
 
-    # Fault injection for OpenHospital: proves the Verifier catches invented evidence.
-    if rt.config.get("pipeline", {}).get("inject_reasoner_fault") and case.verifier.attempts == 0 and d:
-        d[0].evidence_for = d[0].evidence_for + ["F-999"]
     return ReasonerOut(differential=d)
+
+
+def inject_fault(case: Case, rt: Runtime) -> None:
+    """OpenHospital fault injection (any backend: mock, LLM or Deep Agent): on the first attempt, plant a
+    citation to a finding that doesn't exist. The Verifier must catch it before the doctor sees it."""
+    if rt.config.get("pipeline", {}).get("inject_reasoner_fault") and case.verifier.attempts == 0 \
+            and case.differential:
+        case.differential[0].evidence_for = case.differential[0].evidence_for + ["F-999"]
+        case.log("openhospital", "fault injected: F-999 cited on first attempt", rt.clock.iso())
 
 
 def run(case: Case, rt: Runtime) -> Case:
@@ -142,6 +148,7 @@ def run(case: Case, rt: Runtime) -> Case:
         out = _mock_reason(case, rt)
     case.differential = tidy_differential(sorted(out.differential, key=lambda x: x.rank)[:5])
     case.insufficient_info = out.insufficient_info
+    inject_fault(case, rt)
     case.state = CaseState.REASONED
     top = case.differential[0].dx if case.differential else "insufficient information"
     case.log("reasoner", f"differential written (top: {top}); attempt {case.verifier.attempts + 1}", rt.clock.iso())

@@ -167,10 +167,12 @@ SERIOUS_WORDS = re.compile(
 def patient_label(action: str) -> str:
     """Patient-facing name for a follow-up. Use this in EVERY patient text (reminders, missed, rebook)."""
     a = action.lower()
-    if "oncolog" in a or "neuro-oncolog" in a:
+    if "oncolog" in a:
         return "specialist appointment"
-    if "biopsy" in a or "sampling" in a:
+    if re.search(r"biops|sampling|ebus|tbna|bronchoscop", a):
         return "procedure"
-    if SERIOUS_WORDS.search(action):
-        return "appointment"
-    return action
+    plain = re.sub(r"\s*\([^)]*\)", "", action).strip()   # "MRI brain (metastasis protocol)" -> "MRI brain"
+    if not SERIOUS_WORDS.search(plain):
+        return plain
+    friendly = {"mri-brain": "brain MRI", "ct-chest": "chest CT", "pet-ct": "PET-CT scan"}
+    return friendly.get(test_type(action), "appointment")

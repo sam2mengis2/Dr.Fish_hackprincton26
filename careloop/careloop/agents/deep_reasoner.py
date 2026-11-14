@@ -222,6 +222,8 @@ def run(case: Case, rt: Runtime) -> Case:
 
         return reasoner.run(case, rt)
     case.differential = sorted(sink.get("differential", []), key=lambda d: d.rank)[:5]
+    from .reasoner import inject_fault
+    inject_fault(case, rt)
     case.insufficient_info = bool(sink.get("insufficient_info"))
     case.state = CaseState.REASONED
     top = case.differential[0].dx if case.differential else "insufficient information"

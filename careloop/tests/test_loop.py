@@ -227,3 +227,33 @@ def test_urgent_need_moves_pending_routine_test_earlier():
     _add(c, "CT chest with contrast", "2026-11-21", "urgent", [])
     assert len(c.followups) == 1
     assert c.followups[0].due == "2026-11-21" and c.followups[0].appointment is None
+
+
+def test_fault_injection_applies_to_llm_backend_too():
+    """Regression: T8 only planted the fake ID in mock mode, so real-LLM T8 passes were hollow."""
+    from careloop.agents import reasoner
+    from careloop.agents.reasoner import ReasonerOut
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, DxCandidate, Finding, Patient
+    import tempfile
+
+    class StubLLM:
+        is_mock, calls = False, 0
+
+        def structured(self, role, system, user, schema):
+            return ReasonerOut(differential=[DxCandidate(rank=1, dx="x", evidence_for=["F-001"], next_tests=["CT"])])
+
+    cfg = load_config()
+    cfg["pipeline"]["inject_reasoner_fault"] = True
+    rt = Runtime(cfg, CaseStore(tempfile.mkdtemp()), SimClock(), ConsoleMessenger(quiet=True), llm=StubLLM())
+    c = Case(patient=Patient(patient_id="X", name="A B", age=50),
+             findings=[Finding(finding_id="F-001", finding="lung nodule", scan_id="S")])
+    c = reasoner.run(c, rt)
+    assert "F-999" in c.differential[0].evidence_for
+
+
+def test_patient_label_names_tests_plainly():
+    from careloop.knowledge import patient_label
+    assert patient_label("MRI brain with and without gadolinium (dedicated metastasis protocol)") == \
+        "MRI brain with and without gadolinium"
+    assert patient_label("Bronchoscopy with biopsy (EBUS-TBNA)") == "procedure"
