@@ -14,7 +14,7 @@ CONDITIONAL = re.compile(r"\b(if|when|should|consider|unless|as needed|prn)\b|\b
 from ..schema import Case, CaseState, FollowUp
 
 
-def _add(case: Case, action: str, due: str, rule: str, fids: list[str]) -> None:
+def _add(case: Case, action: str, due: str, rule: str, fids: list[str], urgent: bool = False) -> None:
     action = clean_action(action)
     if is_clinician_task(action):
         rule = rule + " | clinician task (not booked, not sent to patient)"
@@ -22,7 +22,10 @@ def _add(case: Case, action: str, due: str, rule: str, fids: list[str]) -> None:
     pending = [fu for fu in case.followups if test_type(fu.action) == kind and fu.status != "completed"]
     if pending:
         fu = pending[0]
-        if due < fu.due:  # same test now needed sooner: move the existing item earlier and rebook it
+        guideline_set = "Fleischner" in fu.rule or "guideline" in fu.rule.lower()
+        if due < fu.due and guideline_set and not urgent:
+            case.log("planner", f"AI suggested '{action}' by {due}; guideline interval for {fu.id} kept ({fu.due})", "")
+        elif due < fu.due:  # same test now needed sooner: move the existing item earlier and rebook it
             fu.due, fu.rule, fu.appointment, fu.status = due, rule + f" (moved earlier from {fu.due})", None, "open"
             for t in case.timers:
                 if t.ref == fu.id:
@@ -51,9 +54,8 @@ def run(case: Case, rt: Runtime) -> Case:
         _add(case, "Immediate clinician review", today, "Critical-results rule: notify ordering clinician now",
              case.urgency_reasons)
     # Guideline-driven items for incidental nodules on the newest scans
-    big_dx = (not review) and any(d.likelihood in ("high", "moderate") and "cancer" in d.dx.lower() for d in case.differential)
     for f in new_scan_findings:
-        if f.finding == "lung nodule" and f.size_mm and not big_dx:
+        if f.finding == "lung nodule" and f.size_mm:  # guideline always applies; AI likelihood can't switch it off
             stable = bool(f.linked_to) and abs(f.growth_mm or 0) <= 1
             r = lung_nodule_rule(f.size_mm, is_high_risk_lung(case.patient.history, case.patient.age), f.date,
                                  stable_on_followup=stable)
@@ -71,7 +73,7 @@ def run(case: Case, rt: Runtime) -> Case:
                     and not CONDITIONAL.search(t)]  # "X if Y" is a contingency, not an appointment
         for t in concrete[:3]:
             _add(case, t, due_from(today, days), f"Top candidate next test; {case.urgency} -> within {days} days",
-                 top.evidence_for)
+                 top.evidence_for, urgent=case.urgency in ("urgent", "critical"))
 
     top_dx = case.differential[0].dx if case.differential else ""
     case.message_tier = "serious" if (case.urgency == "critical" or SERIOUS_WORDS.search(top_dx)) else "routine"

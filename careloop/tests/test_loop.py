@@ -311,3 +311,21 @@ def test_specialist_types_and_labels():
     from careloop.knowledge import patient_label, test_type
     assert test_type("Radiation oncology referral") != test_type("Oncology referral")
     assert patient_label("Neurosurgery referral") == "specialist appointment"
+
+
+def test_ai_likelihood_cannot_switch_off_or_shorten_guideline():
+    """Regression (Deep Agent T1): 'early lung cancer [moderate]' suppressed the Fleischner follow-up."""
+    from careloop.agents import planner
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, DxCandidate, Finding, Patient, Scan
+    import tempfile
+
+    rt = Runtime(load_config(), CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = Case(patient=Patient(patient_id="X", name="A B", age=52), urgency="routine",
+             findings=[Finding(finding_id="F-001", finding="lung nodule", size_mm=7, date="2026-11-13", scan_id="S")],
+             scans=[Scan(scan_id="S", modality="CT", body_part="ABDOMEN", date="2026-11-13")], differential=[
+                 DxCandidate(rank=1, dx="Early lung cancer", likelihood="moderate", evidence_for=["F-001"],
+                             next_tests=["Chest CT with contrast"])])
+    c = planner.run(c, rt)
+    ct = [f for f in c.followups if "chest ct" in f.action.lower()]
+    assert len(ct) == 1 and "Fleischner" in ct[0].rule and "2027-05" <= ct[0].due <= "2027-11"
