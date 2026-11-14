@@ -57,3 +57,58 @@ def test_no_patient_text_ever_names_a_serious_step():
     assert patient_label("PET-CT") == "PET-CT"
     r = _run("T7_no_diagnosis_leak")
     assert r.checks["no_serious_words_to_patient"]
+
+
+def test_prose_in_id_lists_is_moved_to_caveats():
+    """Regression (real LLM, 2026-11-14): the model wrote reasons into evidence_against."""
+    from careloop.schema import DxCandidate, tidy_differential
+
+    d = DxCandidate(rank=1, dx="Benign nodule", evidence_for=["F-002", "small and smooth"],
+                    evidence_against=["No prior imaging for comparison", "F-001"])
+    tidy_differential([d])
+    assert d.evidence_for == ["F-002"] and d.evidence_against == ["F-001"]
+    assert "No prior imaging for comparison" in d.caveats and "small and smooth" in d.caveats
+
+
+def test_guideline_followup_survives_failed_reasoning():
+    """Regression: when the Verifier gives up, the Fleischner follow-up must still be created."""
+    r_cfg = {"pipeline__inject_reasoner_fault": True, "pipeline__max_reasoner_retries": 0}
+    from careloop import service
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from openhospital.tasks import P, S
+    import tempfile
+
+    cfg = load_config()
+    cfg["llm"]["provider"] = "mock"
+    for k, v in r_cfg.items():
+        a, b = k.split("__"); cfg[a][b] = v
+    rt = Runtime(cfg, CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
+    c = service.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    assert c.state.value == "needs_human_review"
+    assert any("chest ct" in f.action.lower() and "Fleischner" in f.rule for f in c.followups)
+    c, _ = service.doctor_reply(rt, "P-002", "APPROVE")
+    pt = [m.text for m in c.messages if m.to == "patient"]
+    assert pt and not any("do not need" in t.lower() for t in pt)
+
+
+def test_critic_suggestions_do_not_fail_review():
+    """Regression (real LLM, 2026-11-14): the critic failed every case over data not in the record."""
+    from careloop.agents import verifier
+    from careloop.runtime import CaseStore, ConsoleMessenger, Runtime, SimClock, load_config
+    from careloop.schema import Case, DxCandidate, Finding, Patient
+    import tempfile
+
+    class StubLLM:
+        is_mock, calls = False, 0
+
+        def structured(self, role, system, user, schema):
+            return schema(blocking=[], suggestions=["No smoking history in the record"])
+
+    cfg = load_config()
+    rt = Runtime(cfg, CaseStore(tempfile.mkdtemp()), SimClock(), ConsoleMessenger(quiet=True), llm=StubLLM())
+    c = Case(patient=Patient(patient_id="X", name="A B", age=50),
+             findings=[Finding(finding_id="F-001", finding="lung nodule", confidence=0.9, scan_id="S1")],
+             differential=[DxCandidate(rank=1, dx="Benign nodule", evidence_for=["F-001"], next_tests=["CT"])])
+    c = verifier.run(c, rt)
+    assert c.verifier.status == "pass"
+    assert c.verifier.suggestions == ["No smoking history in the record"]

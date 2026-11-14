@@ -12,7 +12,7 @@ llm:
   reasoner_model: claude-sonnet-5-5
   verifier_model: claude-haiku-5-5          # ideally a DIFFERENT model than the reasoner
   comms_model: claude-haiku-5-5
-  temperature: 0.2
+  temperature: null          # newer Claude models don't accept a custom temperature
 
 # --- Computer vision ---------------------------------------------------------
 cv:

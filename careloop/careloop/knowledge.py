@@ -44,6 +44,10 @@ SYNONYMS: dict[str, str] = {
     "kidney stone": "kidney stone",
     "renal calculus": "kidney stone",
     "nephrolithiasis": "kidney stone",
+    "ureteral stone": "kidney stone",
+    "ureteral calculus": "kidney stone",
+    "ureterolithiasis": "kidney stone",
+    "urolithiasis": "kidney stone",
     "free air": "pneumoperitoneum",
     "pneumoperitoneum": "pneumoperitoneum",
 }

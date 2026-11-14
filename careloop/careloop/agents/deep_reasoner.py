@@ -42,12 +42,15 @@ Hard rules:
 - Every candidate cites finding IDs that exist (e.g. F-002). Never invent IDs.
 - Include at least one benign/alternative explanation, and consider that findings may be unrelated.
 - Do not rely on findings with confidence below {floor} unless you label them weak.
-- If the evidence supports nothing, submit with insufficient_info=true and an empty list."""
+- If the evidence supports nothing, submit with insufficient_info=true and an empty list.
+- The same lesion across scans ('same lesion as') is one observation: cite the latest ID, note the change in caveats.
+- Data missing from the record goes in caveats; it is not a reason to keep investigating forever."""
 
 CRITIC_PROMPT = """You are a skeptical attending radiologist. You receive a draft differential.
-Use the tools to check the cited findings. Reply with concrete problems: findings that may be
-unrelated, missing benign explanations, rankings the evidence does not support, low-confidence
-evidence. Be brief. If it is sound, say so."""
+Use the tools to check the cited findings. Reply with at most 3 BLOCKING problems (evidence that doesn't
+support a claim, the same lesion double-counted, ranking that contradicts the evidence, an obvious
+explanation missing) and separately at most 3 non-blocking notes (data not in the record, nice-to-haves).
+Be brief. If there are no blocking problems, say so clearly."""
 
 GUIDELINE_PROMPT = """You check proposed next tests against CareLoop's coded rules. Use lookup_guideline
 for any nodule or incidental finding and report what interval the rules give. Never invent intervals."""
@@ -57,8 +60,9 @@ class SubmittedDx(BaseModel):
     rank: int
     dx: str
     likelihood: str = Field("moderate", description="high | moderate | low")
-    evidence_for: list[str]
-    evidence_against: list[str] = Field(default_factory=list)
+    evidence_for: list[str] = Field(description="Finding IDs ONLY, e.g. ['F-002']. No prose.")
+    evidence_against: list[str] = Field(default_factory=list, description="Finding IDs ONLY. No prose.")
+    caveats: list[str] = Field(default_factory=list, description="Reasons, missing data, uncertainties (prose here).")
     rationale: str = ""
     next_tests: list[str] = Field(default_factory=list)
 
@@ -121,6 +125,12 @@ def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
     def submit_differential(differential: list[SubmittedDx], insufficient_info: bool = False) -> str:
         """Submit the final ranked differential (3-5 candidates). Call once, at the end."""
         valid = {f.finding_id for f in case.findings}
+        import re as _re
+        for d in differential:  # prose in ID lists -> caveats, same as the single-call reasoner
+            prose = [x for x in d.evidence_for + d.evidence_against if not _re.match(r"^F-\d{3,}$", x.strip())]
+            d.evidence_for = [x for x in d.evidence_for if x not in prose]
+            d.evidence_against = [x for x in d.evidence_against if x not in prose]
+            d.caveats = d.caveats + prose
         bad = sorted({i for d in differential for i in d.evidence_for + d.evidence_against if i not in valid})
         if bad:
             _trace(f"submit_differential REJECTED unknown IDs {bad}")
@@ -130,7 +140,7 @@ def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
         try:
             sink["differential"] = [DxCandidate(
                 rank=d.rank, dx=d.dx, likelihood=d.likelihood if d.likelihood in ("high", "moderate", "low") else "moderate",
-                evidence_for=d.evidence_for, evidence_against=d.evidence_against,
+                evidence_for=d.evidence_for, evidence_against=d.evidence_against, caveats=d.caveats,
                 rationale=d.rationale, next_tests=d.next_tests) for d in differential]
         except ValidationError as e:
             return f"ERROR: {e}"
@@ -148,7 +158,10 @@ def _model(rt: Runtime):
     from langchain.chat_models import init_chat_model
 
     c = rt.config["llm"]
-    return init_chat_model(c["reasoner_model"], model_provider=c["provider"], temperature=c.get("temperature", 0.2))
+    kwargs = {"model_provider": c["provider"]}
+    if c.get("temperature") is not None:
+        kwargs["temperature"] = c["temperature"]
+    return init_chat_model(c["reasoner_model"], **kwargs)
 
 
 def build_agent(case: Case, rt: Runtime, sink: dict):

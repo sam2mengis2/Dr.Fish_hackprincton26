@@ -24,7 +24,7 @@ class LLM:
             "verifier": c.get("verifier_model"),
             "comms": c.get("comms_model"),
         }
-        self.temperature = c.get("temperature", 0.2)
+        self.temperature = c.get("temperature")
         self._cache: dict = {}
         self.calls = 0
 
@@ -36,9 +36,10 @@ class LLM:
         if role not in self._cache:
             from langchain.chat_models import init_chat_model  # lazy: mock mode needs no langchain
 
-            self._cache[role] = init_chat_model(
-                self.models[role], model_provider=self.provider, temperature=self.temperature
-            )
+            kwargs = {"model_provider": self.provider}
+            if self.temperature is not None:  # newer Claude models reject non-default temperature
+                kwargs["temperature"] = self.temperature
+            self._cache[role] = init_chat_model(self.models[role], **kwargs)
         return self._cache[role]
 
     def structured(self, role: str, system: str, user: str, schema: Type[T]) -> T:

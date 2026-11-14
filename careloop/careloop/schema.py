@@ -75,15 +75,20 @@ class DxCandidate(BaseModel):
     rank: int
     dx: str
     likelihood: Literal["high", "moderate", "low"] = "moderate"
-    evidence_for: list[str] = Field(default_factory=list)      # finding_ids
-    evidence_against: list[str] = Field(default_factory=list)  # finding_ids
+    evidence_for: list[str] = Field(default_factory=list,
+                                    description="Finding IDs ONLY (e.g. 'F-002') that support this candidate. No prose.")
+    evidence_against: list[str] = Field(default_factory=list,
+                                        description="Finding IDs ONLY (e.g. 'F-001') that argue against it. No prose.")
+    caveats: list[str] = Field(default_factory=list,
+                               description="Free-text reasons, missing data and uncertainties (prose goes HERE).")
     rationale: str = ""
     next_tests: list[str] = Field(default_factory=list)
 
 
 class VerifierResult(BaseModel):
     status: Literal["pass", "fail", "pending"] = "pending"
-    notes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)          # blocking issues (cause a retry)
+    suggestions: list[str] = Field(default_factory=list)    # non-blocking reviewer notes for the doctor
     attempts: int = 0
 
 
@@ -180,6 +185,23 @@ class Case(BaseModel):
 
     def followup(self, fu_id: str) -> Optional[FollowUp]:
         return next((f for f in self.followups if f.id == fu_id), None)
+
+
+_FID = __import__("re").compile(r"^F-\d{3,}$")
+
+
+def tidy_differential(cands: list["DxCandidate"]) -> list["DxCandidate"]:
+    """LLMs sometimes write reasons into the ID lists. Keep only ID-shaped entries there and
+    move the prose to caveats. Invented IDs (e.g. F-999) still look like IDs, so the Verifier
+    still catches them; a candidate left with no evidence_for is flagged by the Verifier too."""
+    for d in cands:
+        for field in ("evidence_for", "evidence_against"):
+            ids, prose = [], []
+            for x in getattr(d, field):
+                (ids if _FID.match(x.strip()) else prose).append(x.strip())
+            setattr(d, field, ids)
+            d.caveats.extend(prose)
+    return cands
 
 
 def now_iso(dt: datetime) -> str:

@@ -25,12 +25,13 @@ def run(case: Case, rt: Runtime) -> Case:
     latest = max((s.date for s in case.scans), default=today)
     new_scan_findings = [f for f in case.findings if f.date == latest]
     before = len(case.followups)
+    review = case.state == CaseState.NEEDS_HUMAN_REVIEW  # AI reasoning not trusted: rules-only plan
 
     if case.urgency == "critical":
         _add(case, "Immediate clinician review", today, "Critical-results rule: notify ordering clinician now",
              case.urgency_reasons)
     # Guideline-driven items for incidental nodules on the newest scans
-    big_dx = any(d.likelihood in ("high", "moderate") and "cancer" in d.dx.lower() for d in case.differential)
+    big_dx = (not review) and any(d.likelihood in ("high", "moderate") and "cancer" in d.dx.lower() for d in case.differential)
     for f in new_scan_findings:
         if f.finding == "lung nodule" and f.size_mm and not big_dx:
             stable = bool(f.linked_to) and abs(f.growth_mm or 0) <= 1
@@ -39,7 +40,7 @@ def run(case: Case, rt: Runtime) -> Case:
             if r:
                 _add(case, r[0], r[1], r[2], [f.finding_id])
     # Next tests of the top candidate
-    if case.differential and case.urgency != "critical":
+    if case.differential and case.urgency != "critical" and not review:
         top = case.differential[0]
         days = days_for_urgency(case.urgency or "routine")
         for t in top.next_tests:
@@ -52,6 +53,6 @@ def run(case: Case, rt: Runtime) -> Case:
     case.message_tier = "serious" if (case.urgency == "critical" or SERIOUS_WORDS.search(top_dx)) else "routine"
     new_items = case.followups[before:]
     case.plan_summary = "; ".join(f"{fu.action} by {fu.due}" for fu in new_items) or "No new follow-up needed"
-    case.state = CaseState.PLANNED
+    case.state = CaseState.NEEDS_HUMAN_REVIEW if review else CaseState.PLANNED
     case.log("planner", f"{len(new_items)} follow-up item(s); tier={case.message_tier}", rt.clock.iso())
     return case

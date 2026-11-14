@@ -21,7 +21,8 @@ def compose(case: Case) -> str:
     p = case.patient
     head = f"CareLoop | Patient {_initials(p.name)} ({p.patient_id}) | {case.urgency.upper() if case.urgency else ''}"
     if case.state == CaseState.NEEDS_HUMAN_REVIEW:
-        body = "AI reasoning failed verification twice. Please review the case on the dashboard."
+        body = ("AI reasoning did not pass verification; please review the findings on the dashboard. "
+                "Guideline follow-ups below were created by rule, not by the AI.")
     elif case.urgency == "critical":
         fs = ", ".join(f"{case.finding(i).finding} ({i})" for i in case.urgency_reasons if case.finding(i))
         body = f"CRITICAL finding: {fs}."
@@ -30,6 +31,8 @@ def compose(case: Case) -> str:
                        for f in case.findings if f.finding_id in (case.differential[0].evidence_for if case.differential else []))
         top = case.differential[0].dx if case.differential else "insufficient information"
         body = f"Findings: {fs or 'see dashboard'}.\nTop possibility: {top}."
+        if case.verifier.suggestions:
+            body += f"\n({len(case.verifier.suggestions)} reviewer note(s) on the dashboard.)"
     if case.plan_summary == "No new follow-up needed":
         return f"{head} | FYI\n{body}\nNo new actions suggested; existing plan continues.\nReply APPROVE to acknowledge, or EDIT <note>."
     actions = f"\nSuggested: {case.plan_summary}." if case.plan_summary else ""

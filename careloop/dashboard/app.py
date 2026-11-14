@@ -100,6 +100,8 @@ with left:
     v = case["verifier"]
     (st.success if v["status"] == "pass" else st.error if v["status"] == "fail" else st.info)(
         f"Verifier: {v['status']} after {v['attempts']} attempt(s). {' '.join(v['notes'])}")
+    if v.get("suggestions"):
+        st.caption("Reviewer notes (non-blocking): " + " · ".join(v["suggestions"]))
 
     st.subheader("Follow-up items")
     st.dataframe([{"ID": f["id"], "Action": f["action"], "Owner": f["owner"], "Due": f["due"],

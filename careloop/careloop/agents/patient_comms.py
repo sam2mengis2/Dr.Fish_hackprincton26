@@ -15,7 +15,8 @@ from ..schema import Case, Message
 
 SYSTEM = """Write a short, warm text message (max 60 words, about grade-6 reading level) to a patient.
 You may explain the follow-up plan and appointment below. Do NOT mention any diagnosis, disease
-names, cancer, or anything alarming. Do not give medical advice. Sign off as 'your care team'."""
+names, cancer, or anything alarming. Do not give medical advice. Sign off as 'your care team'.
+Copy every appointment date and time EXACTLY as given (YYYY-MM-DD at HH:MM)."""
 
 CLINICAL_Q = re.compile(r"\b(cancer|serious|dying|die|tumou?r|stop|medication|meds|dose|pain|worse|what is it|is it)\b", re.I)
 
@@ -38,10 +39,15 @@ def notify(case: Case, rt: Runtime) -> Case:
                          for fu in items) or "no further tests"
         fallback = (f"Hi {_first_name(case)}, {doc} reviewed your scan. A routine follow-up is recommended: {plan}. "
                     f"Reply OK to confirm or RESCHEDULE. - your care team")
-        if maybe(rt.llm):
+        if not items:  # nothing planned: don't let the LLM improvise reassurance
+            fallback = (f"Hi {_first_name(case)}, {doc} reviewed your scan. Your care team will contact you "
+                        f"about any next steps. - your care team")
+        if maybe(rt.llm) and items:
             draft = rt.llm.text("comms", SYSTEM, f"Patient first name: {_first_name(case)}. Doctor: {doc}. Plan: {plan}. "
                                                   "End with: Reply OK to confirm or RESCHEDULE.")
-            text = _safe(draft, fallback)
+            # Must keep every booked date; otherwise use the template (it always states them).
+            dates = [fu.appointment[:10] for fu in items if fu.appointment]
+            text = _safe(draft, fallback) if all(d in draft for d in dates) else fallback
         else:
             text = fallback
     text = _safe(text, f"Hi {_first_name(case)}, {doc} will contact you about your recent scan. - your care team")

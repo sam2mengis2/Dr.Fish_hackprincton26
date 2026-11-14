@@ -12,17 +12,24 @@ from pydantic import BaseModel, Field
 
 from ..llm import maybe
 from ..runtime import Runtime
-from ..schema import Case, CaseState, DxCandidate
+from ..schema import Case, CaseState, DxCandidate, tidy_differential
 
 SYSTEM = """You are a diagnostic reasoning assistant supporting (never replacing) a physician.
 Given a patient's imaging findings timeline and history, produce 3-5 ranked POSSIBLE diagnoses.
 Rules:
-1. Every candidate must cite finding IDs (e.g. F-004) in evidence_for; never cite an ID not in the timeline.
+1. evidence_for / evidence_against contain finding IDs ONLY (e.g. F-004), never sentences; never cite an ID
+   not in the timeline. Put reasons, missing data and uncertainties in `caveats`.
 2. Include at least one benign or alternative explanation.
 3. Explicitly consider that findings may be UNRELATED; if so, include a candidate saying so.
 4. Do not lean on findings with confidence below {floor} unless you say they are weak.
 5. If the findings do not support any conclusion, set insufficient_info=true.
 6. next_tests: the tests that would confirm or rule out each candidate.
+7. The same lesion seen on several scans (marked 'same lesion as') is ONE observation: cite the most recent ID
+   and describe the change over time in caveats. Never cite a finding for a claim about a different organ.
+8. Prefer specific diagnoses. If findings in different organ systems have no plausible shared cause, say so in
+   caveats and give per-finding candidates; add an explicit 'unrelated' candidate only when you also propose a link.
+9. Data that is not in the record (smoking, morphology, prior imaging) goes in caveats; set likelihood from the
+   evidence that IS present.
 This is decision support for a doctor, not a diagnosis."""
 
 
@@ -126,7 +133,7 @@ def run(case: Case, rt: Runtime) -> Case:
         out = rt.llm.structured("reasoner", SYSTEM.format(floor=floor), user, ReasonerOut)
     else:
         out = _mock_reason(case, rt)
-    case.differential = sorted(out.differential, key=lambda x: x.rank)[:5]
+    case.differential = tidy_differential(sorted(out.differential, key=lambda x: x.rank)[:5])
     case.insufficient_info = out.insufficient_info
     case.state = CaseState.REASONED
     top = case.differential[0].dx if case.differential else "insufficient information"

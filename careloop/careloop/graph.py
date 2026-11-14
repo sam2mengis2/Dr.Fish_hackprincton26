@@ -50,7 +50,7 @@ def build_graph(rt: Runtime):
             return "planner"
         if s == CaseState.VERIFY_FAILED:
             return "reasoner"
-        return "clinician_comms"  # NEEDS_HUMAN_REVIEW: flag it to the doctor
+        return "planner"  # NEEDS_HUMAN_REVIEW: guideline items are still created; doctor is told to review
 
     g = StateGraph(GraphState)
     g.add_node("perception", node(perception.run))
