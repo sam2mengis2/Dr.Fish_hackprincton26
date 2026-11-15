@@ -6,7 +6,7 @@ from openhospital.tasks import TASKS
 
 def _run(task_id, **overrides):
     cfg = load_config()
-    cfg["llm"]["provider"] = "mock"
+    cfg["llm"]["provider"] = "mock"; cfg["cv"]["cxr_backend"] = "mock"
     for k, v in overrides.items():
         sec, key = k.split("__")
         cfg[sec][key] = v
@@ -79,7 +79,7 @@ def test_guideline_followup_survives_failed_reasoning():
     import tempfile
 
     cfg = load_config()
-    cfg["llm"]["provider"] = "mock"
+    cfg["llm"]["provider"] = "mock"; cfg["cv"]["cxr_backend"] = "mock"
     for k, v in r_cfg.items():
         a, b = k.split("__"); cfg[a][b] = v
     rt = Runtime(cfg, CaseStore(tempfile.mkdtemp()), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))

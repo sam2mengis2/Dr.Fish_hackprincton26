@@ -25,7 +25,7 @@ def compose(case: Case) -> str:
                 "Guideline follow-ups below were created by rule, not by the AI.")
     elif case.urgency == "critical":
         fs = ", ".join(f"{case.finding(i).finding} ({i})" for i in case.urgency_reasons if case.finding(i))
-        body = f"CRITICAL finding: {fs}."
+        body = f"Finding: {fs}. Act now."
     else:
         latest = max((s.date for s in case.scans), default="")
         new = [f for f in case.findings if f.date == latest]
@@ -36,7 +36,14 @@ def compose(case: Case) -> str:
                 d += f" {f.size_mm:g} mm"
             if f.linked_to:
                 ch = f.growth_mm
-                d += f", same lesion as {f.linked_to}" + (f" ({ch:+g} mm)" if ch is not None else "")
+                prior = case.finding(f.linked_to)
+                pscan = next((s for s in case.scans if prior and s.scan_id == prior.scan_id), None)
+                where = ""
+                if prior and pscan:
+                    where = f" on {pscan.date} {pscan.modality}" + (f" at {pscan.site}" if pscan.site else "")
+                    if prior.size_mm:
+                        where += f", then {prior.size_mm:g} mm"
+                d += f", same lesion as {f.linked_to}{where}" + (f" ({ch:+g} mm)" if ch is not None else "")
             return f"{d} ({f.finding_id})"
 
         fs = "; ".join(_desc(f) for f in new)
@@ -45,6 +52,11 @@ def compose(case: Case) -> str:
                     case.differential[0] if case.differential else None)
         top = best.dx if best else "insufficient information"
         body = f"New on this scan: {fs or 'see dashboard'}.\nTop possibility: {top}."
+        signed = next((s for s in case.scans if s.date == latest and s.reported_at), None)
+        if signed:
+            ready = f"Report ready: {signed.modality} {signed.body_part.lower()}" + \
+                    (f" at {signed.site}" if signed.site else "") + f", signed {signed.reported_at.replace('T', ' ')}."
+            body = ready + "\n" + body
         if case.verifier.suggestions:
             body += f"\n({len(case.verifier.suggestions)} reviewer note(s) on the dashboard.)"
     if case.plan_summary == "No new follow-up needed" and case.state != CaseState.NEEDS_HUMAN_REVIEW:

@@ -3,7 +3,7 @@
 One interface: run(scan) -> list[Finding]. Backends:
   - mock: reads scan.mock_model_output (so the whole loop runs with no GPU/images)
   - torchxrayvision: pretrained DenseNet on a real chest X-ray (pip install torchxrayvision scikit-image)
-  - brain MRI: plug your TsionVision model into run_brain_mri()
+  - brain MRI: an open-source model (e.g. a MONAI/BraTS bundle) would plug into run_brain_mri()
 """
 from __future__ import annotations
 
@@ -42,8 +42,19 @@ def _from_mock(scan: Scan, rt: Runtime, source: str) -> list[Finding]:
 
 
 def run_cxr(scan: Scan, rt: Runtime) -> list[Finding]:
-    if rt.config["cv"]["cxr_backend"] != "torchxrayvision" or not scan.image_path:
+    if rt.config["cv"]["cxr_backend"] != "torchxrayvision":
         return _from_mock(scan, rt, "cxr_model")
+    if not scan.image_path:  # real-model mode: no image means no image read (never fall back to made-up output)
+        return []
+    from pathlib import Path
+
+    from ..runtime import ROOT
+
+    path = Path(scan.image_path)
+    path = path if path.is_absolute() else ROOT / path
+    if not path.exists():  # real-model mode: missing file means no image read
+        return []
+    scan.image_path = str(path)
     import numpy as np
     import skimage.io
     import torch
@@ -74,10 +85,9 @@ def run_cxr(scan: Scan, rt: Runtime) -> list[Finding]:
 
 
 def run_brain_mri(scan: Scan, rt: Runtime) -> list[Finding]:
-    if rt.config["cv"]["brain_mri_backend"] != "tsionvision" or not scan.image_path:
-        return _from_mock(scan, rt, "brain_mri_model")
-    # TODO(stretch): load TsionVision, segment, convert mask -> lesion count, volume, location words.
-    raise NotImplementedError("Plug TsionVision in here")
+    # No open-source brain MRI model is wired yet; an open model (e.g. a BraTS/MONAI segmentation bundle)
+    # would plug in here: segment -> lesion count, volume, location words.
+    return _from_mock(scan, rt, "brain_mri_model")
 
 
 def run_fallback(scan: Scan, rt: Runtime) -> list[Finding]:

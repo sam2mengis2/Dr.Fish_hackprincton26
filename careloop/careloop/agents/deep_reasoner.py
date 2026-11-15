@@ -45,6 +45,8 @@ Hard rules:
 - Do not rely on findings with confidence below {floor} unless you label them weak.
 - If the evidence supports nothing, submit with insufficient_info=true and an empty list.
 - The same lesion across scans ('same lesion as') is one observation: cite the latest ID, note the change in caveats.
+  If growth argues against a candidate (e.g. benign), say so in that candidate's caveats and lower its likelihood;
+  never list the same ID in both evidence_for and evidence_against.
 - Data missing from the record goes in caveats; it is not a reason to keep investigating forever.
 - next_tests are plain names of tests the patient attends. Scheduling is decided by code, so never add
   notes like 'clinician decision' or 'not a coded rule' to them."""
@@ -116,16 +118,25 @@ def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
                 f"now {f.size_mm} mm on {f.date}; growth {f.growth_mm} mm.")
 
     @tool
-    def lookup_guideline(finding: str, size_mm: Optional[float] = None) -> str:
-        """Look up CareLoop's coded follow-up rule and urgency level for a finding type and size."""
-        _trace(f"lookup_guideline({finding}, {size_mm})")
+    def lookup_guideline(finding: str, size_mm: Optional[float] = None, growth_mm: Optional[float] = None) -> str:
+        """Look up CareLoop's coded follow-up rule and urgency level for a finding type and size.
+        Pass growth_mm for a lesion that changed since a prior scan (the rule differs for growing nodules);
+        if omitted, CareLoop fills it in from the matching finding in the record."""
+        _trace(f"lookup_guideline({finding}, {size_mm}{', growth ' + str(growth_mm) if growth_mm is not None else ''})")
         finding = normalize(finding)  # 'hilar mass' and 'lung mass' must get the same answer
         lvl = urgency_for(finding, size_mm, 0.9, True)
         out = {"normalized_finding": finding, "urgency_level": lvl}
         if finding == "lung nodule" and size_mm:
-            r = lung_nodule_rule(size_mm, is_high_risk_lung(case.patient.history, case.patient.age),
-                                 rt.clock.now().date().isoformat())
+            # Same inputs the planner uses: the finding's own scan date and its growth vs the prior.
+            match = next((f for f in reversed(case.findings) if f.finding == finding and f.size_mm == size_mm), None)
+            if growth_mm is None and match and match.linked_to:
+                growth_mm = match.growth_mm
+            when = match.date if match else rt.clock.now().date().isoformat()
+            r = lung_nodule_rule(size_mm, is_high_risk_lung(case.patient.history, case.patient.age), when,
+                                 growth_mm=growth_mm)
             out["rule"] = {"action": r[0], "due": r[1], "source": r[2]} if r else "no routine follow-up"
+            if growth_mm is not None:
+                out["growth_mm"] = growth_mm
         return json.dumps(out)
 
     @tool
@@ -153,7 +164,8 @@ def build_tools(case: Case, rt: Runtime, sink: dict) -> dict[str, Any]:
             return f"ERROR: {e}"
         sink["insufficient_info"] = insufficient_info
         _trace(f"submit_differential accepted ({len(differential)} candidates)")
-        return "Accepted. You are done; reply with a one-line summary."
+        return ("Accepted. Now call write_todos once more marking every item completed (or say which you "
+                "skipped), then reply with a one-line summary.")
 
     return {t.name: t for t in [get_timeline, get_finding, get_patient_history, compare_with_prior,
                                 lookup_guideline, submit_differential]}
@@ -210,14 +222,36 @@ def _file_text(files: dict, path: str) -> str:
     return "\n".join(content) if isinstance(content, list) else str(content or "")
 
 
+def _call_counter():
+    """Counts every model call inside the Deep Agent, subagents included (they don't go through rt.llm)."""
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    class Counter(BaseCallbackHandler):
+        def __init__(self):
+            self.calls = 0
+
+        def on_chat_model_start(self, *a, **k):
+            self.calls += 1
+
+        def on_llm_start(self, *a, **k):
+            self.calls += 1
+
+    return Counter()
+
+
 def run(case: Case, rt: Runtime) -> Case:
     sink: dict = {}
     agent = build_agent(case, rt, sink)
+    counter = _call_counter()
     ask = f"Investigate patient {case.patient.patient_id}. Urgency so far: {case.urgency}."
     if case.verifier.status == "fail" and case.verifier.notes:
         ask += "\nA reviewer rejected your previous differential. Fix these:\n- " + "\n- ".join(case.verifier.notes)
     result = agent.invoke({"messages": [{"role": "user", "content": ask}]},
-                          {"recursion_limit": rt.config["pipeline"].get("deep_agent_recursion_limit", 60)})
+                          {"recursion_limit": rt.config["pipeline"].get("deep_agent_recursion_limit", 60),
+                           "callbacks": [counter]})
+    case.agent_llm_calls += counter.calls
+    if hasattr(rt.llm, "calls"):
+        rt.llm.calls += counter.calls  # so OpenHospital's LLM-call totals include the Deep Agent
 
     case.agent_plan = [f"[{t.get('status', '?')}] {t.get('content', '')}" for t in result.get("todos", []) or []]
     case.workup_note = _file_text(result.get("files"), "/workup.md")
@@ -234,6 +268,6 @@ def run(case: Case, rt: Runtime) -> Case:
     case.insufficient_info = bool(sink.get("insufficient_info"))
     case.state = CaseState.REASONED
     top = case.differential[0].dx if case.differential else "insufficient information"
-    case.log("deep_reasoner", f"investigation done ({len(case.agent_trace)} tool steps, "
+    case.log("deep_reasoner", f"investigation done ({counter.calls} model calls, {len(case.agent_trace)} tool steps, "
                               f"{len(case.agent_plan)} todos); top: {top}", rt.clock.iso())
     return case

@@ -58,7 +58,7 @@ def run(case: Case, rt: Runtime) -> Case:
         if f.finding == "lung nodule" and f.size_mm:  # guideline always applies; AI likelihood can't switch it off
             stable = bool(f.linked_to) and abs(f.growth_mm or 0) <= 1
             r = lung_nodule_rule(f.size_mm, is_high_risk_lung(case.patient.history, case.patient.age), f.date,
-                                 stable_on_followup=stable)
+                                 stable_on_followup=stable, growth_mm=f.growth_mm if f.linked_to else None)
             if r:
                 _add(case, r[0], r[1], r[2], [f.finding_id])
     # Next tests of the top candidate

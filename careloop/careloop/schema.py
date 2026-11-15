@@ -29,11 +29,12 @@ class CaseState(str, Enum):
     ESCALATED = "escalated"
     DOCTOR_CALLING = "doctor_calling"
     ACTIVE = "active"
+    AWAITING_REPORT = "awaiting_report"   # image acquired, radiologist report not signed yet
     CLOSED = "closed"
 
 
 Urgency = Literal["critical", "urgent", "routine", "incidental"]
-FollowUpStatus = Literal["open", "patient_notified", "booked", "missed", "escalated", "completed"]
+FollowUpStatus = Literal["open", "patient_notified", "booked", "missed", "escalated", "completed", "cancelled"]
 
 
 class Scan(BaseModel):
@@ -43,6 +44,15 @@ class Scan(BaseModel):
     date: str                  # ISO date
     report_text: str = ""
     image_path: Optional[str] = None
+    site: str = ""             # hospital/imaging site that performed the scan
+    indication: str = ""       # reason for the order, e.g. "ER: flank pain, rule out kidney stone"
+    report_status: Literal["pending", "final"] = "final"
+    acquired_at: Optional[str] = None   # when the images were taken (sim clock)
+    reported_at: Optional[str] = None   # when the radiologist signed the report
+    read_priority: Optional[Literal["stat", "urgent", "routine"]] = None
+    read_priority_reasons: list[str] = Field(default_factory=list)
+    ai_preread: list[dict] = Field(default_factory=list)   # image-model output before the report (queue sorting only)
+    outside: bool = False      # imported from another hospital's record (history only, no new workup)
     # Mock-mode stand-in for model output when there is no real image/model.
     mock_model_output: list[dict] = Field(default_factory=list)
     route: list[str] = Field(default_factory=list)
@@ -90,6 +100,7 @@ class VerifierResult(BaseModel):
     notes: list[str] = Field(default_factory=list)          # blocking issues (cause a retry)
     suggestions: list[str] = Field(default_factory=list)    # non-blocking reviewer notes for the doctor
     attempts: int = 0
+    history: list[str] = Field(default_factory=list)        # earlier critic complaints (to stop repeat loops)
 
 
 class FollowUp(BaseModel):
@@ -102,6 +113,12 @@ class FollowUp(BaseModel):
     status: FollowUpStatus = "open"
     appointment: Optional[str] = None   # ISO datetime of booked slot
     completed_by_scan: Optional[str] = None
+    site: Optional[str] = None          # where the appointment is booked
+    waitlisted: bool = False            # booked slot is later than the clinical due date -> cancellation list
+    booking_note: str = ""              # why this slot/site (e.g. "earliest of 2 hospitals")
+    offer: Optional[dict] = None        # pending earlier-slot offer {site, slot, expires}
+    declined: list[str] = Field(default_factory=list)   # offered slots the patient skipped
+    days_saved: int = 0                 # days gained by taking freed slots
 
 
 class Approval(BaseModel):
@@ -112,7 +129,7 @@ class Approval(BaseModel):
 
 
 class Message(BaseModel):
-    to: Literal["doctor", "patient", "nurse", "covering_doctor"]
+    to: Literal["doctor", "patient", "nurse", "covering_doctor", "radiologist"]
     direction: Literal["out", "in"] = "out"
     tier: Optional[Literal["serious", "routine"]] = None
     text: str
@@ -126,7 +143,8 @@ class AuditEntry(BaseModel):
 
 
 class Timer(BaseModel):
-    kind: Literal["approval_reminder", "approval_escalate", "appt_reminder", "appt_missed_check", "rebook_escalate"]
+    kind: Literal["approval_reminder", "approval_escalate", "appt_reminder", "appt_missed_check", "rebook_escalate",
+                  "report_overdue", "report_overdue_2", "offer_expire"]
     fire_at: str               # ISO datetime on the simulated clock
     ref: str = ""              # follow-up id, if any
     done: bool = False
@@ -141,6 +159,8 @@ class Patient(BaseModel):
     labs: list[str] = Field(default_factory=list)
     meds: list[str] = Field(default_factory=list)
     ordering_doctor: str = "Dr. Lee"
+    preferred_site: str = ""            # where the patient would rather go for follow-ups (e.g. closer to home)
+    demo_auto_reply: bool = False       # simulated waitlist patient: accepts earlier-slot offers automatically
     language: str = "en"
 
 
@@ -159,6 +179,7 @@ class Case(BaseModel):
     # Deep Agent investigator output (shown on the dashboard)
     agent_plan: list[str] = Field(default_factory=list)
     workup_note: str = ""
+    agent_llm_calls: int = 0            # model calls made inside the Deep Agent (incl. subagents)
     agent_trace: list[str] = Field(default_factory=list)
     verifier: VerifierResult = Field(default_factory=VerifierResult)
     followups: list[FollowUp] = Field(default_factory=list)

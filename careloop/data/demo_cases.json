@@ -1,41 +1,256 @@
 {
-  "_note": "All patients, reports and model outputs are synthetic, written for the demo. mock_model_output stands in for CV model probabilities until real images/models are wired in.",
-  "patients": {
-    "P-001": {"patient_id": "P-001", "name": "James Doyle", "age": 64, "sex": "M",
-              "history": ["Former smoker, 40 pack-years", "Hypertension"], "labs": ["CBC normal"],
-              "meds": ["Lisinopril"], "ordering_doctor": "Dr. Lee"},
-    "P-002": {"patient_id": "P-002", "name": "Maria Ruiz", "age": 52, "sex": "F",
-              "history": ["Kidney stones"], "labs": [], "meds": [], "ordering_doctor": "Dr. Patel"},
-    "P-003": {"patient_id": "P-003", "name": "Alex Kim", "age": 24, "sex": "M",
-              "history": ["Tall, thin build"], "labs": [], "meds": [], "ordering_doctor": "Dr. Lee"},
-    "P-004": {"patient_id": "P-004", "name": "Grace Okafor", "age": 71, "sex": "F",
-              "history": ["Shortness of breath on exertion"], "labs": [], "meds": [], "ordering_doctor": "Dr. Patel"}
+ "_note": "All patients, reports and model outputs are synthetic, written for the demo. mock_model_output stands in for CV model probabilities until real images/models are wired in. | report_delay: scan is acquired first (report pending, reading queue) and signed on the next demo step. outside_records: priors from another hospital, imported as history. followup: arrives on the booked appointment day.",
+ "patients": {
+  "P-001": {
+   "patient_id": "P-001",
+   "name": "James Doyle",
+   "age": 64,
+   "sex": "M",
+   "history": [
+    "Former smoker, 40 pack-years",
+    "Hypertension"
+   ],
+   "labs": [
+    "CBC normal"
+   ],
+   "meds": [
+    "Lisinopril"
+   ],
+   "ordering_doctor": "Dr. Lee"
   },
-  "scans": [
-    {"patient_id": "P-001", "scan": {
-      "scan_id": "CXR-P001-1", "modality": "CR", "body_part": "CHEST", "date": "2026-10-30",
-      "report_text": "Frontal and lateral chest radiograph. There is a 3.2 cm mass in the right hilum. No pneumothorax. No pleural effusion. Heart size is normal. Recommend CT chest with contrast.",
-      "mock_model_output": [{"label": "Mass", "prob": 0.86, "location": "right hilum"},
-                            {"label": "Effusion", "prob": 0.31}]}},
-    {"patient_id": "P-001", "scan": {
-      "scan_id": "MRI-P001-1", "modality": "MR", "body_part": "BRAIN", "date": "2026-11-13",
-      "report_text": "MRI brain with and without contrast. There are three ring-enhancing lesions in the left frontal lobe and right parietal lobe with surrounding edema. No midline shift. Findings are concerning for metastatic disease.",
-      "mock_model_output": [{"label": "ring-enhancing lesion", "prob": 0.91, "location": "left frontal lobe", "count": 3}]}},
-    {"patient_id": "P-002", "scan": {
-      "scan_id": "CT-P002-1", "modality": "CT", "body_part": "ABDOMEN", "date": "2026-11-13",
-      "report_text": "CT abdomen and pelvis without contrast for flank pain. A 5 mm obstructing stone is seen in the left ureter, consistent with kidney stone. Incidental note is made of a 7 mm nodule in the right lower lobe. Recommend follow-up chest CT.",
-      "mock_model_output": []}},
-    {"patient_id": "P-003", "scan": {
-      "scan_id": "CXR-P003-1", "modality": "CR", "body_part": "CHEST", "date": "2026-11-14",
-      "report_text": "Portable chest radiograph. Large left pneumothorax. No pleural effusion.",
-      "mock_model_output": [{"label": "Pneumothorax", "prob": 0.94, "location": "left hemithorax"}]}},
-    {"patient_id": "P-004", "scan": {
-      "scan_id": "CXR-P004-1", "modality": "CR", "body_part": "CHEST", "date": "2026-11-10",
-      "report_text": "Chest radiograph. Enlarged cardiac silhouette consistent with cardiomegaly. Lungs are clear. No pneumothorax.",
-      "mock_model_output": [{"label": "Cardiomegaly", "prob": 0.82}]}},
-    {"patient_id": "P-004", "scan": {
-      "scan_id": "MRI-P004-1", "modality": "MR", "body_part": "BRAIN", "date": "2026-11-13",
-      "report_text": "MRI brain for headaches. There is a 9 mm extra-axial mass along the right frontal convexity, most consistent with meningioma. No edema. No midline shift.",
-      "mock_model_output": []}}
+  "P-002": {
+   "patient_id": "P-002",
+   "name": "Maria Ruiz",
+   "age": 52,
+   "sex": "F",
+   "history": [
+    "Kidney stones"
+   ],
+   "labs": [],
+   "meds": [],
+   "ordering_doctor": "Dr. Patel",
+   "preferred_site": "Riverside Medical Center"
+  },
+  "P-003": {
+   "patient_id": "P-003",
+   "name": "Alex Kim",
+   "age": 24,
+   "sex": "M",
+   "history": [
+    "Tall, thin build"
+   ],
+   "labs": [],
+   "meds": [],
+   "ordering_doctor": "Dr. Lee"
+  },
+  "P-004": {
+   "patient_id": "P-004",
+   "name": "Grace Okafor",
+   "age": 71,
+   "sex": "F",
+   "history": [
+    "Shortness of breath on exertion"
+   ],
+   "labs": [],
+   "meds": [],
+   "ordering_doctor": "Dr. Patel"
+  }
+ },
+ "scans": [
+  {
+   "patient_id": "P-001",
+   "scan": {
+    "scan_id": "CXR-P001-1",
+    "modality": "CR",
+    "body_part": "CHEST",
+    "date": "2026-10-30",
+    "report_text": "Frontal and lateral chest radiograph. There is a 3.2 cm mass in the right hilum. No pneumothorax. No pleural effusion. Heart size is normal. Recommend CT chest with contrast.",
+    "mock_model_output": [
+     {
+      "label": "Mass",
+      "prob": 0.86,
+      "location": "right hilum"
+     },
+     {
+      "label": "Effusion",
+      "prob": 0.31
+     }
+    ],
+    "site": "Eastside General",
+    "indication": "Outpatient: persistent cough, former smoker",
+    "image_path": "data/scans/cxr_p001_nih_00027426_000.png"
+   }
+  },
+  {
+   "patient_id": "P-001",
+   "scan": {
+    "scan_id": "MRI-P001-1",
+    "modality": "MR",
+    "body_part": "BRAIN",
+    "date": "2026-11-13",
+    "report_text": "MRI brain with and without contrast. There are three ring-enhancing lesions in the left frontal lobe and right parietal lobe with surrounding edema. No midline shift. Findings are concerning for metastatic disease.",
+    "mock_model_output": [
+     {
+      "label": "ring-enhancing lesion",
+      "prob": 0.91,
+      "location": "left frontal lobe",
+      "count": 3
+     }
+    ],
+    "site": "Eastside General",
+    "indication": "Staging: new headaches, known lung mass"
+   }
+  },
+  {
+   "patient_id": "P-002",
+   "scan": {
+    "scan_id": "CT-P002-1",
+    "modality": "CT",
+    "body_part": "ABDOMEN",
+    "date": "2026-11-13",
+    "report_text": "CT abdomen and pelvis without contrast for flank pain. A 5 mm obstructing stone is seen in the left ureter, consistent with kidney stone. Incidental note is made of a 7 mm nodule in the right lower lobe. Recommend follow-up chest CT.",
+    "mock_model_output": [],
+    "site": "Eastside General",
+    "indication": "ER: left flank pain, rule out kidney stone"
+   },
+   "report_delay": true
+  },
+  {
+   "patient_id": "P-003",
+   "scan": {
+    "scan_id": "CXR-P003-1",
+    "modality": "CR",
+    "body_part": "CHEST",
+    "date": "2026-11-14",
+    "report_text": "Portable chest radiograph. Large left pneumothorax. No pleural effusion.",
+    "mock_model_output": [
+     {
+      "label": "Pneumothorax",
+      "prob": 0.94,
+      "location": "left hemithorax"
+     }
+    ],
+    "site": "Eastside General",
+    "indication": "ER: sudden chest pain and shortness of breath after a fall, rule out pneumothorax"
+   },
+   "report_delay": true
+  },
+  {
+   "patient_id": "P-004",
+   "scan": {
+    "scan_id": "CXR-P004-1",
+    "modality": "CR",
+    "body_part": "CHEST",
+    "date": "2026-11-10",
+    "report_text": "Chest radiograph. Enlarged cardiac silhouette consistent with cardiomegaly. Lungs are clear. No pneumothorax.",
+    "mock_model_output": [
+     {
+      "label": "Cardiomegaly",
+      "prob": 0.82
+     }
+    ],
+    "site": "Eastside General",
+    "indication": "Outpatient: shortness of breath on exertion",
+    "image_path": "data/scans/cxr_p004_nih_00000001_000.png"
+   },
+   "report_delay": true
+  },
+  {
+   "patient_id": "P-004",
+   "scan": {
+    "scan_id": "MRI-P004-1",
+    "modality": "MR",
+    "body_part": "BRAIN",
+    "date": "2026-11-13",
+    "report_text": "MRI brain for headaches. There is a 9 mm extra-axial mass along the right frontal convexity, most consistent with meningioma. No edema. No midline shift.",
+    "mock_model_output": [],
+    "site": "Eastside General",
+    "indication": "Outpatient: chronic headaches"
+   }
+  },
+  {
+   "patient_id": "P-002",
+   "followup": true,
+   "scan": {
+    "scan_id": "CT-P002-2",
+    "modality": "CT",
+    "body_part": "CHEST",
+    "date": "2027-02-04",
+    "site": "Riverside Medical Center",
+    "indication": "Follow-up: growing right lower lobe nodule",
+    "report_text": "CT chest without contrast. The 7 mm nodule in the right lower lobe is unchanged in size. No new nodules.",
+    "mock_model_output": []
+   }
+  }
+ ],
+ "outside_records": [
+  {
+   "patient_id": "P-002",
+   "scan": {
+    "scan_id": "CT-P002-0",
+    "modality": "CT",
+    "body_part": "CHEST",
+    "date": "2024-11-20",
+    "site": "Riverside Medical Center",
+    "indication": "Outpatient: chronic cough",
+    "report_text": "CT chest without contrast. Incidental note is made of a 4 mm nodule in the right lower lobe. No routine follow-up recommended for a low-risk patient. Lungs otherwise clear.",
+    "mock_model_output": []
+   }
+  }
+ ],
+ "busy_scanners": {
+  "_note": "Demo of Leyat's 5-6 month CT/MRI waits: turns on per-site backlogs and seeds patients already booked at Riverside.",
+  "backlog_days": {
+   "Riverside Medical Center": 120,
+   "Eastside General": 165
+  },
+  "waiting_patients": [
+   {
+    "patient": {
+     "patient_id": "P-101",
+     "name": "Daniel Brooks",
+     "age": 58,
+     "sex": "M",
+     "ordering_doctor": "Dr. Lee",
+     "preferred_site": "Riverside Medical Center",
+     "demo_auto_reply": true
+    },
+    "action": "Follow-up chest CT",
+    "due": "2027-06-01",
+    "appointment": "2026-12-03T09:00",
+    "site": "Riverside Medical Center",
+    "cancels": true
+   },
+   {
+    "patient": {
+     "patient_id": "P-102",
+     "name": "Priya Shah",
+     "age": 63,
+     "sex": "F",
+     "ordering_doctor": "Dr. Patel",
+     "preferred_site": "Riverside Medical Center",
+     "demo_auto_reply": true
+    },
+    "action": "Follow-up chest CT",
+    "due": "2027-05-15",
+    "appointment": "2027-03-15T09:00",
+    "site": "Riverside Medical Center"
+   },
+   {
+    "patient": {
+     "patient_id": "P-103",
+     "name": "Tom Becker",
+     "age": 70,
+     "sex": "M",
+     "ordering_doctor": "Dr. Lee",
+     "preferred_site": "Riverside Medical Center",
+     "demo_auto_reply": true
+    },
+    "action": "Follow-up chest CT",
+    "due": "2027-04-01",
+    "appointment": "2027-04-12T11:00",
+    "site": "Riverside Medical Center"
+   }
   ]
+ }
 }

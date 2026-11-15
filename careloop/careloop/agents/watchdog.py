@@ -5,6 +5,8 @@ tick() fires every due timer on the simulated clock:
   appt_reminder     -> remind the patient
   appt_missed_check -> if the follow-up scan hasn't arrived: mark missed, offer re-book, set escalation
   rebook_escalate   -> still missed: nurse navigator calls the patient
+  report_overdue    -> radiologist report not signed in time: alert the reading radiologist
+  report_overdue_2  -> still unsigned: alert the radiology lead and tell the ordering doctor it's delayed
 A case closes only when every follow-up item is completed (closed by intake when the scan arrives).
 """
 from __future__ import annotations
@@ -55,7 +57,31 @@ def tick(case: Case, rt: Runtime) -> Case:
             fu.status = "escalated"
             _say(case, rt, "nurse", f"Nurse navigator: {pid} missed '{fu.action}' and hasn't re-booked. Please call the patient.")
             case.log("watchdog", f"{fu.id} still missed -> nurse navigator alerted", rt.clock.iso())
-    if case.followups and all(f.status == "completed" for f in case.followups):
+        elif t.kind == "offer_expire" and fu and fu.offer:
+            from .scheduler import decline_offer
+
+            _say(case, rt, "patient", "The earlier slot we offered has been passed to the next patient. You keep "
+                                      "your current appointment. - your care team")
+            decline_offer(case, rt, expired=True)
+        elif t.kind in ("report_overdue", "report_overdue_2"):
+            scan = next((s for s in case.scans if s.scan_id == t.ref and s.report_status == "pending"), None)
+            if scan is None:
+                continue
+            hrs = (now - datetime.fromisoformat(scan.acquired_at)).total_seconds() / 3600 if scan.acquired_at else 0
+            exam = f"{scan.modality} {scan.body_part.lower()}"
+            if t.kind == "report_overdue":
+                _say(case, rt, "radiologist", f"Report overdue: {pid} {exam} ({scan.read_priority}) unsigned for "
+                                              f"{hrs:.0f} h. Order reason: {scan.indication or 'n/a'}.")
+                case.log("watchdog", f"{scan.scan_id} report overdue -> radiologist alerted", rt.clock.iso())
+            else:
+                _say(case, rt, "radiologist", f"SECOND NOTICE to radiology lead: {pid} {exam} still unsigned after "
+                                              f"{hrs:.0f} h. Please reassign.")
+                _say(case, rt, "doctor", f"FYI: the report for {pid}'s {exam} is delayed ({hrs:.0f} h). Radiology has "
+                                         f"been notified; you'll get a text the moment it's signed.")
+                case.log("watchdog", f"{scan.scan_id} still unsigned -> radiology lead + ordering doctor told",
+                         rt.clock.iso())
+    pending_report = any(s.report_status == "pending" for s in case.scans)
+    if case.followups and not pending_report and all(f.status == "completed" for f in case.followups):
         if case.state != CaseState.CLOSED:
             case.state = CaseState.CLOSED
             case.log("watchdog", "all follow-ups completed -> case closed", rt.clock.iso())

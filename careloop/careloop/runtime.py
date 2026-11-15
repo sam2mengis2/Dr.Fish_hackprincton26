@@ -98,19 +98,6 @@ class ConsoleMessenger(Messenger):
             self.sink(f"\n[TEXT -> {to} | {patient_id}]\n{text}\n")
 
 
-class PhotonMessenger(Messenger):
-    """Fill this in with Photon's SDK (ask at their table / Discord for the starter kit).
-
-    Contract: send() delivers a text to the phone mapped to `to` for this patient.
-    Inbound: configure Photon's webhook to POST to /webhooks/reply with
-    {"patient_id": ..., "from": "doctor"|"patient", "text": ...}.
-    """
-
-    def __init__(self, phone_book: dict):
-        self.phone_book = phone_book  # {"doctor": "+1...", "patient": "+1..."}
-
-    def send(self, to: str, patient_id: str, text: str) -> None:
-        raise NotImplementedError("Wire Photon's send call here; ConsoleMessenger works meanwhile.")
 
 
 # ---------------------------------------------------------------- context
@@ -133,7 +120,10 @@ def default_runtime(config_path: Optional[str] = None, quiet: bool = False) -> R
     store = CaseStore(ROOT / cfg.get("store_dir", "runs/cases"))
     clock = SimClock(cfg.get("clock_start", "2026-11-14T09:00"))
     if cfg.get("messenger") == "photon":
-        messenger: Messenger = PhotonMessenger(cfg.get("phone_book", {}))
+        from .photon_messenger import PhotonMessenger
+
+        messenger: Messenger = PhotonMessenger(ROOT / "runs" / "photon_registry.json",
+                                               console_fallback=ConsoleMessenger(quiet=quiet))
     else:
         messenger = ConsoleMessenger(quiet=quiet)
     return Runtime(cfg, store, clock, messenger)

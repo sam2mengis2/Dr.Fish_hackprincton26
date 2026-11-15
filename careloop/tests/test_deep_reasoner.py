@@ -29,7 +29,7 @@ def call(name, **args):
 
 def _case_after_two_scans(tmp_path):
     cfg = load_config()
-    cfg["llm"]["provider"] = "mock"
+    cfg["llm"]["provider"] = "mock"; cfg["cv"]["cxr_backend"] = "mock"
     rt = Runtime(cfg, CaseStore(tmp_path), SimClock("2026-11-14T09:00"), ConsoleMessenger(quiet=True))
     p = Patient(**DEMO["patients"]["P-001"])
     for sid in ("CXR-P001-1", "MRI-P001-1"):

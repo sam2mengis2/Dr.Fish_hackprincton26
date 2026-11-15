@@ -39,7 +39,7 @@ def show(case) -> None:
 
 def scans_for(pid):
     return [(Patient(**DATA["patients"][s["patient_id"]]), Scan(**s["scan"])) for s in DATA["scans"]
-            if s["patient_id"] == pid]
+            if s["patient_id"] == pid and not s.get("followup")]
 
 
 def main(only=None):

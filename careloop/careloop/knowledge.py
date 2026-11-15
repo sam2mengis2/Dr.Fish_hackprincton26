@@ -110,10 +110,14 @@ def is_high_risk_lung(history: list[str], age: int) -> bool:
 
 
 def lung_nodule_rule(size_mm: float, high_risk: bool, scan_date: str,
-                     stable_on_followup: bool = False) -> Optional[tuple[str, str, str]]:
+                     stable_on_followup: bool = False, growth_mm: Optional[float] = None) -> Optional[tuple[str, str, str]]:
     """Simplified Fleischner 2017, single solid incidental nodule.
     Returns (action, due_iso, rule_text) or None if no routine follow-up."""
     d = date.fromisoformat(scan_date)
+    if growth_mm is not None and growth_mm >= 2:
+        return ("Short-interval chest CT (growing nodule)", (d + timedelta(days=90)).isoformat(),
+                f"Fleischner 2017 (simplified): solid nodule grew {growth_mm:g} mm since prior CT -> suspicious; "
+                "CT within 3 months, consider PET-CT or sampling")
     if stable_on_followup and 6 <= size_mm <= 8:
         return ("Follow-up chest CT (second interval)", (d + timedelta(days=365)).isoformat(),
                 "Fleischner 2017 (simplified): 6-8 mm stable at first follow-up -> consider CT at 18-24 months")

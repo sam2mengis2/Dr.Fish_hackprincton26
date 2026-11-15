@@ -30,7 +30,7 @@ streamlit run dashboard/app.py
 |---|---|---|---|
 | 0 | Supervisor | `careloop/graph.py` | LangGraph StateGraph |
 | 1 | Intake & Router | `careloop/agents/intake.py` | code |
-| 2 | Perception workers | `careloop/agents/perception.py` | CV (mock / TorchXRayVision / TsionVision hook) |
+| 2 | Perception workers | `careloop/agents/perception.py` | CV (mock / TorchXRayVision on real chest X-rays; MRI/CT hooks) |
 | 3 | Report Extractor | `careloop/agents/extractor.py` | LLM (mock: regex) + verbatim-quote guard |
 | 4 | Reconciler | `careloop/agents/reconciler.py` | code |
 | 5 | Urgency Triage | `careloop/agents/triage.py` | rules |
@@ -58,7 +58,7 @@ Shared case record: `careloop/schema.py`. Entry points: `careloop/service.py`
 4. **More OpenHospital tasks** (~2 h): mock mode scores 1.0 by construction because the mock agents
    were written for these cases. Real numbers come from the real LLM on tasks you didn't tune on:
    write ~10 more synthetic reports, mark a third `split="holdout"`.
-5. **Stretch:** TsionVision brain MRI (`run_brain_mri`), MedGemma fallback, Postgres store.
+5. **Stretch:** open-source brain MRI / CT models in `run_brain_mri` and the fallback slot, Postgres store.
 
 ## Deep Agent Diagnostic Investigator (LangChain prize)
 
@@ -81,6 +81,63 @@ python -m openhospital.run_eval --name deepagent --set llm.provider=anthropic \
 ```
 
 Tracing in LangSmith: `export LANGSMITH_TRACING=true LANGSMITH_API_KEY=...` (no code change).
+
+## Photon 2.0 texting (doctor approvals + patient updates over iMessage)
+
+`careloop/photon_messenger.py` uses Photon's Python client (`photonhq-api`). Replies are **polled**
+every 2 s, so no public URL or tunnel is needed.
+
+1. Photon Beta dashboard (app.beta.photon.codes): create/select a project; **API keys -> New API key** with
+   `project:read` + `project:write`.
+2. **iMessage platform page:** enter your iPhone's number as the sender, confirm it on the phone
+   (Settings -> Apps -> Messages -> Send & Receive), then **Add** to get an assigned shared-line number.
+3. Environment (setx, never in git): `PHOTON_API_KEY`, `PHOTON_PROJECT_ID`, `PHOTON_AGENT_HANDLE` (the assigned number).
+4. `config.yaml`: `messenger: photon`, then `uvicorn api:app --port 8000` and check `GET /photon/status`.
+5. From the phone, text the assigned number **`DOCTOR PATIENT`** (solo: one phone plays both roles) or
+   `DOCTOR` / `PATIENT` from two phones. Photon's shared line can't text first, so this step is required.
+6. Load a demo scan from the dashboard: the doctor alert arrives as an iMessage. Reply **APPROVE**; the
+   patient's booking text arrives. Prefix a patient ID to target a case: `P-002 APPROVE`.
+
+## Imaging-department pain points (from Leyat Mesfin, imaging, Mount Sinai)
+
+1. **Reports are delayed**, so the family doctor can't see results.
+   - `service.acquire_scan`: images exist, report not signed. The scan joins the **radiologist reading queue**
+     (`GET /reading-queue`), ranked stat / urgent / routine by `agents/read_priority.py` from the order reason,
+     open follow-ups (e.g. a growing nodule on a 3-month deadline), and the chest X-ray model's pre-read.
+     An LLM read of the order reason may move a scan UP, never down. The pre-read only sets reading order;
+     nothing is sent to the family doctor or patient before the report is signed.
+   - STAT scans alert the radiologist immediately. Watchdog `report_overdue` alerts radiology at the target
+     (`timers.report_due_hours`), then the radiology lead + the ordering doctor ("delayed, you'll hear when signed").
+   - `service.sign_report`: the late report attaches to the same scan and the normal loop runs; the doctor's
+     text opens with "Report ready".
+2. **Cross-hospital data and scheduling.**
+   - `service.import_outside_record`: a prior scan from another hospital becomes history, so a new nodule is
+     compared against it ("same lesion as the 2024 CT at Riverside, then 4 mm (+3 mm)"). Growth >= 2 mm
+     triggers the growing-nodule rule (CT within 3 months instead of 6-12).
+   - One calendar per hospital: follow-ups book at the patient's `preferred_site`; the patient can reply
+     SWITCH to move to another hospital; a follow-up scan done at either hospital closes the loop.
+
+3. **Patients wait 5-6 months for CT/MRI.** CareLoop can't add scanners; it stops slots being wasted and
+   sends patients to the shortest line (`agents/scheduler.py`, config `scheduling`):
+   - Books the patient's preferred hospital only if it meets the guideline due date, otherwise the earliest
+     slot across the network. Anyone booked later than their due date is on the **cancellation list**.
+   - A freed slot (cancellation, reschedule, an accepted offer) is offered by text to the waiting patient with
+     the **most urgent clinical due date** ("reply TAKE / SKIP", held `offer_hours`), then the next. Each accepted
+     offer frees a later slot, which is offered on, so one cancellation can put several patients back on time.
+   - `GET /waitlist`, `POST /cancel`. Patients reply TAKE, SKIP, CANCEL, RESCHEDULE or SWITCH.
+   - OpenHospital T10-T12 grade the reading queue, overdue-report chasing and cancellation backfill
+     (each with an anti-reward-hacking check; deliberately breaking the ordering makes them fail).
+
+Real image model: set `cv.cxr_backend: torchxrayvision` (`pip install torchxrayvision`; weights download on first
+use). Demo X-rays in `data/scans/` are public NIH ChestX-ray14 sample images from the TorchXRayVision repo.
+In real-model mode a scan without an image gets no image read (no made-up outputs). CT/MRI are read from the
+report only; open-source CT/MRI models would plug into `perception.py`.
+
+Dashboard demo: sidebar "Simulate morning" (busy scanners + 3 scans arrive; the pneumothorax jumps the
+queue), then "Next step" for P-002 signs Maria's report -> doctor text -> APPROVE -> Maria is booked at
+Riverside in March, later than her February due date, so she's on the cancellation list -> "Simulate a
+cancellation" -> Maria is texted the December slot -> reply TAKE -> her March slot passes to Tom, who is now
+on time too -> "Next step" again = her follow-up CT arrives and closes the loop.
 
 ## OpenHospital (evaluation environment)
 

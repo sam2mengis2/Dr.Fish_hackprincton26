@@ -9,6 +9,7 @@ least one anti-reward-hacking check where a shortcut could score without doing t
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -103,7 +104,9 @@ def t3_grade(rt, ctx):
         "cites_lung_and_brain": bool(hit) and bool(set(hit[0].evidence_for) & lung) and bool(set(hit[0].evidence_for) & brain),
         "benign_alternative_listed": any(any(w in d.dx.lower() for w in ("abscess", "infect", "benign", "granuloma"))
                                          for d in c.differential),
-        "unrelated_alternative_listed": any("unrelated" in d.dx.lower() for d in c.differential),
+        # genuine synonyms only: the check means "considered that lung and brain may not be connected"
+        "unrelated_alternative_listed": any(re.search(r"unrelated|separate|independent|synchronous|second primary",
+                                                      d.dx, re.I) for d in c.differential),
         "all_cited_ids_real": {i for d in c.differential for i in d.evidence_for} <= {f.finding_id for f in c.findings},
     }
 
@@ -231,6 +234,109 @@ def t9_grade(rt, ctx):
     }
 
 
+# ---------------------------------------------------------------- T10 report delays: reading queue (Leyat #1)
+def t10_script(rt, svc):
+    svc.acquire_scan(rt, P("P-004"), S("CXR-P004-1"))   # routine, arrives first
+    rt.clock.advance(minutes=10)
+    svc.acquire_scan(rt, P("P-002"), S("CT-P002-1"))
+    rt.clock.advance(minutes=10)
+    svc.acquire_scan(rt, P("P-003"), S("CXR-P003-1"))   # possible pneumothorax, arrives last
+    queue = [r["patient_id"] for r in svc.reading_queue(rt)]
+    leaked = any(_msgs(rt.store.get(p), to) for p in ("P-002", "P-003", "P-004") for to in ("doctor", "patient"))
+    rt.clock.advance(hours=3)
+    svc.sign_report(rt, "P-002", "CT-P002-1", S("CT-P002-1").report_text)
+    return {"queue": queue, "leaked_before_sign": leaked}
+
+
+def t10_grade(rt, ctx):
+    c = rt.store.get("P-002")
+    doc = _msgs(c, "doctor")
+    return {
+        "stat_scan_read_first": ctx["queue"][:1] == ["P-003"],
+        "radiologist_alerted_for_stat": any("READ NOW" in m.text for m in _msgs(rt.store.get("P-003"), "radiologist")),
+        # anti reward-hacking: nothing (AI pre-read included) reaches doctor or patient before the report is signed
+        "no_results_before_signed_report": not ctx["leaked_before_sign"],
+        "doctor_told_report_ready": bool(doc) and "Report ready" in doc[-1].text,
+        "signed_scan_left_queue": "P-002" not in [r["patient_id"] for r in svc_queue(rt)],
+    }
+
+
+def svc_queue(rt):
+    from careloop import service
+
+    return service.reading_queue(rt)
+
+
+# ---------------------------------------------------------------- T11 overdue reports get chased (Leyat #1)
+def t11_script(rt, svc):
+    svc.acquire_scan(rt, P("P-002"), S("CT-P002-1"))
+    scan = next(s for s in rt.store.get("P-002").scans if s.scan_id == "CT-P002-1")
+    # The target depends on the queue priority the system chose (an LLM may rank an ER scan urgent).
+    target = rt.config["timers"]["report_due_hours"][scan.read_priority]
+
+    def overdue_msgs():
+        return [m.text for m in _msgs(rt.store.get("P-002"), "radiologist") if "overdue" in m.text.lower()]
+
+    svc.advance_clock(rt, minutes=target * 60 - 30)
+    early = len(overdue_msgs())
+    svc.advance_clock(rt, minutes=60)
+    first = overdue_msgs()
+    svc.advance_clock(rt, hours=target)
+    return {"early": early, "first": first, "priority": scan.read_priority, "target_h": target}
+
+
+def t11_grade(rt, ctx):
+    c = rt.store.get("P-002")
+    return {
+        "no_alert_before_target": ctx["early"] == 0,
+        "radiology_alerted_at_target": bool(ctx["first"]),
+        "lead_and_doctor_told_at_2x": any("SECOND NOTICE" in m.text for m in _msgs(c, "radiologist"))
+                                       and any("delayed" in m.text for m in _msgs(c, "doctor")),
+        # anti reward-hacking: a case with an unsigned report is never marked closed
+        "not_closed_while_unsigned": c.state.value == "awaiting_report",
+    }
+
+
+# ---------------------------------------------------------------- T12 cancellations go to who needs them (Leyat #2)
+def t12_script(rt, svc):
+    svc.seed_busy_scanners(rt, DEMO)
+    svc.import_outside_record(rt, P("P-002"), Scan(**DEMO["outside_records"][0]["scan"]))
+    svc.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    svc.doctor_reply(rt, "P-002", "APPROVE")
+    before = {r["patient_id"]: r["appointment"] for r in svc.waitlist(rt)}
+    freed = next(r["appointment"] for r in svc.waitlist(rt) if r["patient_id"] == "P-101")
+    svc.cancel_appointment(rt, "P-101", reason="got the scan elsewhere")
+    offered = [r["patient_id"] for r in svc.waitlist(rt) if r["offer"]]
+    svc.patient_reply(rt, "P-002", "TAKE")
+    after = {r["patient_id"]: r["appointment"] for r in svc.waitlist(rt)}
+    return {"before": before, "offered": offered, "after": after, "freed": freed}
+
+
+def t12_grade(rt, ctx):
+    b, a = ctx["before"], ctx["after"]
+    slots = [(r["site"], r["appointment"]) for r in svc_wait(rt)]
+    m = rt.store.get("P-002").followups
+    ct = next(f for f in m if "chest ct" in f.action.lower())
+    return {
+        "late_booking_flagged": b.get("P-002", "") > ct.due,
+        # anti reward-hacking: the slot goes to the most urgent due date, not first-come or the next in line
+        "offered_to_most_urgent": ctx["offered"] == ["P-002"],
+        # Maria gets the freed slot itself (an urgent AI plan may set a due date no slot can meet;
+        # the grader checks she got the best slot that exists, not an impossible date)
+        "maria_got_freed_slot": a.get("P-002") == ctx["freed"],
+        "maria_moved_up": a.get("P-002", "9999") < b.get("P-002", ""),
+        "freed_slot_passed_on": a.get("P-103", "9999") < b.get("P-103", ""),
+        "nobody_moved_later": all(a.get(p, "") <= b[p] for p in b if p in a),
+        "no_double_booking": len(slots) == len(set(slots)),
+    }
+
+
+def svc_wait(rt):
+    from careloop import service
+
+    return service.waitlist(rt)
+
+
 TASKS: dict[str, Task] = {t.id: t for t in [
     Task("T1_incidental_nodule", "Incidental 7 mm nodule on a kidney-stone CT gets a guideline follow-up", t1_script, t1_grade),
     Task("T2_critical_fast_path", "Pneumothorax skips reasoning and reaches the doctor immediately", t2_script, t2_grade),
@@ -243,4 +349,10 @@ TASKS: dict[str, Task] = {t.id: t for t in [
          config_overrides={"pipeline.inject_reasoner_fault": True}),
     Task("T9_honest_loop_closing", "Follow-up stays open until the real scan arrives (anti reward-hacking)",
          t9_script, t9_grade, split="holdout"),
+    Task("T10_reading_queue", "Unsigned scans are read by need, nothing leaks before the report is signed",
+         t10_script, t10_grade),
+    Task("T11_overdue_report", "Unsigned report is chased on time: radiology, then lead + ordering doctor",
+         t11_script, t11_grade),
+    Task("T12_cancellation_backfill", "A cancelled slot goes to the most urgent waiting patient and is passed on",
+         t12_script, t12_grade),
 ]}
