@@ -45,6 +45,7 @@ class Scan(BaseModel):
     report_text: str = ""
     image_path: Optional[str] = None
     site: str = ""             # hospital/imaging site that performed the scan
+    image_credit: str = ""     # source/licence of a demo image (public datasets, Wikimedia Commons)
     indication: str = ""       # reason for the order, e.g. "ER: flank pain, rule out kidney stone"
     report_status: Literal["pending", "final"] = "final"
     acquired_at: Optional[str] = None   # when the images were taken (sim clock)

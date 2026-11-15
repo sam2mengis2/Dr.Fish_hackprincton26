@@ -15,8 +15,9 @@ import streamlit as st
 API = os.environ.get("CARELOOP_API", "http://localhost:8000")
 st.set_page_config(page_title="CareLoop", page_icon="🩺", layout="wide")
 
+ROOT = Path(__file__).resolve().parents[1]
 try:
-    DEMO_SCANS = _json.loads((Path(__file__).resolve().parents[1] / "data" / "demo_cases.json").read_text())["scans"]
+    DEMO_SCANS = _json.loads((ROOT / "data" / "demo_cases.json").read_text())["scans"]
 except Exception:
     DEMO_SCANS = []
 
@@ -263,6 +264,36 @@ with tab_pt:
                        "Order reason": x.get("indication", ""),
                        "Report": "⏳ pending" if x.get("report_status") == "pending" else "✅ signed"}
                       for x in case["scans"]], hide_index=True, width='stretch')
+        signed = [x for x in case["scans"] if x.get("report_status") != "pending" and x.get("report_text")]
+        if signed:
+            with st.expander(f"📄  View reports ({len(signed)} signed)"):
+                for x in signed:
+                    who = " (outside record)" if x.get("outside") else ""
+                    st.markdown(f"**{x['scan_id']}** · {x['modality']} {x['body_part'].lower()} · {x['date']} · "
+                                f"{x.get('site') or ''}{who}")
+                    st.markdown(f"> {html.escape(x['report_text'])}")
+        # The images themselves, from the moment they exist: the radiologist reads them before signing,
+        # and the doctor can open them later. Scans with no image file are report-only in this demo.
+        def _img(x):
+            ip = x.get("image_path")
+            if not ip:
+                return None
+            fp = Path(ip)
+            fp = fp if fp.is_absolute() else ROOT / fp
+            return fp if fp.exists() else None
+        with_img = [(x, _img(x)) for x in case["scans"]]
+        shown = [(x, fp) for x, fp in with_img if fp]
+        missing = [x for x, fp in with_img if x.get("image_path") and not fp]
+        if shown:
+            st.markdown('<div class="cl-note" style="margin-top:8px"><b>Images</b></div>', unsafe_allow_html=True)
+            cols = st.columns(min(len(shown), 3))
+            for col, (x, fp) in zip(cols, shown):
+                state = "report pending: radiologist to read" if x.get("report_status") == "pending" else "report signed"
+                col.image(str(fp), width=300, caption=f"{x['scan_id']} · {x['modality']} {x['body_part'].lower()} · "
+                                                     f"{x['date']} · {state}"
+                                                     + (f"  \nImage: {x['image_credit']}" if x.get("image_credit") else ""))
+        for x in missing:
+            st.caption(f"Image for {x['scan_id']} not found ({x['image_path']}). Add the file to show it here.")
         if pend:
             with st.expander("✍️  Sign a report as the radiologist"):
                 with st.form("sign"):

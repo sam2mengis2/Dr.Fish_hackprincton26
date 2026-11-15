@@ -78,7 +78,8 @@
     ],
     "site": "Eastside General",
     "indication": "Outpatient: persistent cough, former smoker",
-    "image_path": "data/scans/cxr_p001_nih_00027426_000.png"
+    "image_path": "data/scans/cxr_p001_nih_00027426_000.png",
+    "image_credit": "NIH ChestX-ray14 (public), via TorchXRayVision test images"
    }
   },
   {
@@ -131,7 +132,9 @@
      }
     ],
     "site": "Eastside General",
-    "indication": "ER: sudden chest pain and shortness of breath after a fall, rule out pneumothorax"
+    "indication": "ER: sudden chest pain and shortness of breath after a fall, rule out pneumothorax",
+    "image_path": "data/scans/cxr_p003_pneumothorax.jpg",
+    "image_credit": "Wikimedia Commons 'Pneumothorax CXR.jpg' by Clinical Cases, CC BY-SA 2.5"
    },
    "report_delay": true
   },
@@ -151,7 +154,8 @@
     ],
     "site": "Eastside General",
     "indication": "Outpatient: shortness of breath on exertion",
-    "image_path": "data/scans/cxr_p004_nih_00000001_000.png"
+    "image_path": "data/scans/cxr_p004_nih_00000001_000.png",
+    "image_credit": "NIH ChestX-ray14 (public), via TorchXRayVision test images"
    },
    "report_delay": true
   },

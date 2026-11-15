@@ -132,7 +132,10 @@ Real image model: set `cv.cxr_backend: torchxrayvision` (`pip install torchxrayv
 use). Demo X-rays in `data/scans/` are public NIH ChestX-ray14 sample images from the TorchXRayVision repo.
 In real-model mode a scan without an image gets no image read (no made-up outputs). Each flagged finding
 gets a **Grad-CAM heatmap** (last dense block of the DenseNet) saved to `runs/heatmaps/` and shown on the
-dashboard: where the model's evidence came from, not a diagnosis. James's demo report says *left* hilum
+dashboard: where the model's evidence came from, not a diagnosis. Image credits: James's and Grace's X-rays are NIH ChestX-ray14 (public) samples from the TorchXRayVision repo;
+Alex's X-ray is Wikimedia Commons "Pneumothorax CXR.jpg" by Clinical Cases (CC BY-SA 2.5), saved as
+`data/scans/cxr_p003_pneumothorax.jpg`. Every scan with an image file is shown on the dashboard from the moment
+it arrives (so the radiologist reads it there before signing). James's demo report says *left* hilum
 because that is where the real image's opacity (and the model's attention) is. CT/MRI are read from the
 report only; open-source CT/MRI models would plug into `perception.py`.
 
