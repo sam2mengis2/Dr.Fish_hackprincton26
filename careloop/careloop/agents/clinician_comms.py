@@ -31,7 +31,10 @@ def compose(case: Case) -> str:
         new = [f for f in case.findings if f.date == latest]
 
         def _desc(f):
-            d = f"{f.finding} {f.location}".strip()
+            loc = f.location or ""
+            if loc.lower() in {"heart", "cardiac", "chest", "lung", "lungs", "brain", "abdomen"} or loc.lower() in f.finding:
+                loc = ""  # "cardiomegaly heart" -> "cardiomegaly"
+            d = f"{f.finding} {loc}".strip()
             if f.size_mm:
                 d += f" {f.size_mm:g} mm"
             if f.linked_to:
@@ -50,8 +53,34 @@ def compose(case: Case) -> str:
         new_ids = {f.finding_id for f in new}
         best = next((d for d in case.differential if set(d.evidence_for) & new_ids),
                     case.differential[0] if case.differential else None)
-        top = best.dx if best else "insufficient information"
-        body = f"New on this scan: {fs or 'see dashboard'}.\nTop possibility: {top}."
+        if best:
+            n = len(set(best.evidence_for))
+            basis = f"{best.likelihood}, based on {n} finding{'s' if n != 1 else ''}"
+            from ..knowledge import is_clinician_task
+            from .planner import INVASIVE
+
+            tests = [t for t in best.next_tests if not is_clinician_task(t) and not INVASIVE.search(t)][:2]
+            confirm = f" To confirm: {', '.join(tests)}." if tests else ""
+            top = f"Top possibility ({basis}): {best.dx}.{confirm}"
+        else:
+            top = "Top possibility: insufficient information."
+        body = f"New on this scan: {fs or 'see dashboard'}.\n{top}"
+        latest_ids = {s.scan_id for s in case.scans if s.date == latest}
+        closed = [fu for fu in case.followups if fu.completed_by_scan in latest_ids]
+        if closed:
+            res = []
+            for f in new:
+                if f.linked_to and f.growth_mm is not None:
+                    res.append(f"{f.finding} {'stable' if abs(f.growth_mm) <= 1 else f'changed {f.growth_mm:+g} mm'}"
+                               + (f" at {f.size_mm:g} mm" if f.size_mm else ""))
+            # earlier bookings still pending (new suggestions from this scan are listed under Suggested)
+            still = [f"{fu.action} ({fu.appointment[:10]})" for fu in case.followups
+                     if fu.status in ("booked", "missed", "escalated") and fu.appointment and fu not in closed]
+            done = "; ".join(f"{fu.action}" for fu in closed)
+            head_line = f"Follow-up done: {done}" + (f" - {', '.join(res)}." if res else ".")
+            if still:
+                head_line += f"\nStill open: {'; '.join(still)}."
+            body = head_line + "\n" + body
         signed = next((s for s in case.scans if s.date == latest and s.reported_at), None)
         if signed:
             ready = f"Report ready: {signed.modality} {signed.body_part.lower()}" + \

@@ -1,6 +1,12 @@
 """Tests always run offline in mock mode, whatever config.yaml is set to for live demos
-(real LLM, real X-ray model, Photon)."""
-import careloop.runtime as runtime
+(real LLM, real X-ray model, Photon), and never send LangSmith traces: tracing would also read through
+the scripted fake model's reply list and break the Deep Agent tests."""
+import os
+
+for _k in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"):
+    os.environ[_k] = "false"
+
+import careloop.runtime as runtime  # noqa: E402
 
 _real_load_config = runtime.load_config
 

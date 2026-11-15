@@ -64,7 +64,7 @@
     "modality": "CR",
     "body_part": "CHEST",
     "date": "2026-10-30",
-    "report_text": "Frontal and lateral chest radiograph. There is a 3.2 cm mass in the right hilum. No pneumothorax. No pleural effusion. Heart size is normal. Recommend CT chest with contrast.",
+    "report_text": "Frontal and lateral chest radiograph. There is a 3.2 cm mass in the left hilum. No pneumothorax. No pleural effusion. Heart size is normal. Recommend CT chest with contrast.",
     "mock_model_output": [
      {
       "label": "Mass",

@@ -44,7 +44,9 @@ def tick(case: Case, rt: Runtime) -> Case:
                 and datetime.fromisoformat(fu.appointment) > now \
                 and now - datetime.fromisoformat(t.fire_at) < timedelta(hours=6):  # skip stale reminders after a clock jump
             when = datetime.fromisoformat(fu.appointment).strftime("%a %b %d at %I:%M %p")
-            _say(case, rt, "patient", f"Reminder: your {patient_label(fu.action)} is on {when}. Reply RESCHEDULE if you need another time.")
+            where = f" at {fu.site}" if fu.site else ""
+            _say(case, rt, "patient", f"Reminder: your {patient_label(fu.action)} is on {when}{where}. "
+                                      "Reply RESCHEDULE if you need another time.")
             case.log("watchdog", f"{fu.id} reminder sent", rt.clock.iso())
         elif t.kind == "appt_missed_check" and fu and fu.status == "booked":
             fu.status = "missed"

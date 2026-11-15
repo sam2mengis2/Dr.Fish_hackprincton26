@@ -78,10 +78,63 @@ def run_cxr(scan: Scan, rt: Runtime) -> list[Finding]:
     for label, p in zip(model.pathologies, probs):
         if not label or label not in TXRV_TO_CANON or p < _threshold(rt, label):
             continue
+        heat = None
+        try:
+            heat = _gradcam_png(model, img, model.pathologies.index(label), scan, label)
+        except Exception:  # a heatmap is a nice-to-have; never lose the finding over it
+            heat = None
         out.append(Finding(finding=TXRV_TO_CANON[label], confidence=round(float(p), 2), sources=["cxr_model"],
-                           scan_id=scan.scan_id, date=scan.date))
-        # TODO(heatmap): Grad-CAM on model.features for this class -> save PNG -> heatmap_path
+                           scan_id=scan.scan_id, date=scan.date, heatmap_path=heat))
     return out
+
+
+def _jet(v):
+    """Tiny jet colormap (no matplotlib needed): v in [0,1] -> RGB uint8."""
+    import numpy as np
+
+    r = np.clip(1.5 - np.abs(4 * v - 3), 0, 1)
+    g = np.clip(1.5 - np.abs(4 * v - 2), 0, 1)
+    b = np.clip(1.5 - np.abs(4 * v - 1), 0, 1)
+    return (np.stack([r, g, b], -1) * 255).astype("uint8")
+
+
+def _gradcam_png(model, x, idx: int, scan: Scan, label: str) -> str:
+    """Grad-CAM on the last dense block: where in the image the model's evidence for `label` comes from.
+    Saved as an overlay PNG next to the case store. It explains the model's attention, not the diagnosis."""
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from ..runtime import ROOT
+
+    acts = {}
+    hook = model.features.register_forward_hook(lambda m, i, o: acts.__setitem__("a", o))
+    try:
+        x = x.clone()
+        with torch.enable_grad():
+            out = model(x)
+            a = acts["a"]
+            a.retain_grad()
+            model.zero_grad()
+            out[0, idx].backward()
+            w = a.grad.mean(dim=(2, 3), keepdim=True)
+            cam = torch.relu((w * a).sum(1))[0].detach().numpy()
+    finally:
+        hook.remove()
+    if cam.max() <= 0:
+        return None
+    cam = cam / cam.max()
+    cam = np.array(Image.fromarray((cam * 255).astype("uint8")).resize((224, 224), Image.BILINEAR)) / 255.0
+    base = x[0, 0].detach().numpy()
+    base = ((base - base.min()) / (np.ptp(base) or 1) * 255).astype("uint8")
+    gray = np.stack([base] * 3, -1).astype(float)
+    alpha = (0.55 * cam)[..., None]
+    over = (gray * (1 - alpha) + _jet(cam).astype(float) * alpha).astype("uint8")
+    out_dir = ROOT / "runs" / "heatmaps"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{scan.scan_id}_{label.replace(' ', '_')}.png"
+    Image.fromarray(over).resize((448, 448), Image.BILINEAR).save(path)
+    return str(path)
 
 
 def run_brain_mri(scan: Scan, rt: Runtime) -> list[Finding]:

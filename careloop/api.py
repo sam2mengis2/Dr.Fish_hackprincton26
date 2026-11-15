@@ -120,9 +120,22 @@ def demo_load(pid: str):
                     raise HTTPException(409, "approve the plan first so the follow-up gets booked")
                 appt = fu.appointment
                 if rt.clock.iso() < appt:
+                    # Demo time-skip to the appointment day. Only this patient's story moves forward: their clinic
+                    # visits that fell inside the skipped weeks are recorded as attended (simulated), and other
+                    # demo patients are not ticked, so the skip doesn't flood the phone with alerts for cases
+                    # nobody touched. (Use the +1 day / +30 days buttons to show overdue/missed handling.)
+                    from careloop.agents.scheduler import resource
+
+                    for f in case.followups:
+                        if f.status == "booked" and f.appointment and f.appointment < appt \
+                                and resource(f.action) == "clinic":
+                            f.status, f.appointment = "completed", f.appointment
+                            case.log("demo", f"{f.id} '{f.action}' attended (simulated during time skip)", appt)
+                    for t in case.timers:
+                        if t.fire_at < appt:
+                            t.done = True  # reminders/missed checks inside the skip are moot now
+                    rt.store.save(case)
                     rt.clock.set(appt)
-                    for c in rt.store.list():
-                        rt.store.save(watchdog_tick(c))
                 scan.date, scan.site = appt[:10], fu.site or scan.site
             if e.get("report_delay"):
                 return service.acquire_scan(rt, patient, scan)

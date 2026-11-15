@@ -130,7 +130,10 @@ every 2 s, so no public URL or tunnel is needed.
 
 Real image model: set `cv.cxr_backend: torchxrayvision` (`pip install torchxrayvision`; weights download on first
 use). Demo X-rays in `data/scans/` are public NIH ChestX-ray14 sample images from the TorchXRayVision repo.
-In real-model mode a scan without an image gets no image read (no made-up outputs). CT/MRI are read from the
+In real-model mode a scan without an image gets no image read (no made-up outputs). Each flagged finding
+gets a **Grad-CAM heatmap** (last dense block of the DenseNet) saved to `runs/heatmaps/` and shown on the
+dashboard: where the model's evidence came from, not a diagnosis. James's demo report says *left* hilum
+because that is where the real image's opacity (and the model's attention) is. CT/MRI are read from the
 report only; open-source CT/MRI models would plug into `perception.py`.
 
 Dashboard demo: sidebar "Simulate morning" (busy scanners + 3 scans arrive; the pneumothorax jumps the

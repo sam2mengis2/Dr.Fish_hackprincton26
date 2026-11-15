@@ -10,11 +10,14 @@ import re
 
 from ..runtime import Runtime
 
+# Invasive procedures the AI suggests are never auto-booked: the physician decides (coded rules never order them).
+INVASIVE = re.compile(r"biops|\bebus\b|\btbna\b|bronchoscop|resection|lobectomy|surgical|surgery|needle aspiration|"
+                      r"tissue sampling|\bfna\b", re.I)
 CONDITIONAL = re.compile(r"\b(if|when|should|consider|unless|as needed|prn)\b|\breview (ct|imaging|images)\b", re.I)
 from ..schema import Case, CaseState, FollowUp
 
 
-def _add(case: Case, action: str, due: str, rule: str, fids: list[str], urgent: bool = False) -> None:
+def _add(case: Case, action: str, due: str, rule: str, fids: list[str], critical: bool = False) -> None:
     action = clean_action(action)
     if is_clinician_task(action):
         rule = rule + " | clinician task (not booked, not sent to patient)"
@@ -23,7 +26,9 @@ def _add(case: Case, action: str, due: str, rule: str, fids: list[str], urgent: 
     if pending:
         fu = pending[0]
         guideline_set = "Fleischner" in fu.rule or "guideline" in fu.rule.lower()
-        if due < fu.due and guideline_set and not urgent:
+        # A guideline date (which already accounts for size and growth) is only overridden by a CRITICAL finding,
+        # never by AI urgency: a repeat CT one week later shows nothing and adds radiation.
+        if due < fu.due and guideline_set and not critical:
             case.log("planner", f"AI suggested '{action}' by {due}; guideline interval for {fu.id} kept ({fu.due})", "")
         elif due < fu.due:  # same test now needed sooner: move the existing item earlier and rebook it
             fu.due, fu.rule, fu.appointment, fu.status = due, rule + f" (moved earlier from {fu.due})", None, "open"
@@ -68,12 +73,18 @@ def run(case: Case, rt: Runtime) -> Case:
         # follow-up scan for the nodule doesn't restart workup for an older, unrelated problem.
         top = next((d for d in case.differential if set(d.evidence_for) & new_ids), case.differential[0])
         days = days_for_urgency(case.urgency or "routine")
+        if case.urgency == "urgent":
+            days = 14  # AI-suggested extra tests: within 2 weeks (urgent suspected-cancer pathways), not 7 days
         concrete = [t for t in top.next_tests
                     if "per guideline" not in t.lower()
                     and not CONDITIONAL.search(t)]  # "X if Y" is a contingency, not an appointment
         for t in concrete[:3]:
+            if INVASIVE.search(t):
+                _add(case, f"Discuss {t}", due_from(today, days),
+                     "AI-suggested invasive procedure: clinician decision, never auto-booked", top.evidence_for)
+                continue
             _add(case, t, due_from(today, days), f"Top candidate next test; {case.urgency} -> within {days} days",
-                 top.evidence_for, urgent=case.urgency in ("urgent", "critical"))
+                 top.evidence_for, critical=case.urgency == "critical")
 
     top_dx = case.differential[0].dx if case.differential else ""
     case.message_tier = "serious" if (case.urgency == "critical" or SERIOUS_WORDS.search(top_dx)) else "routine"

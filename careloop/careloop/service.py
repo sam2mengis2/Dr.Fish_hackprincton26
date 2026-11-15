@@ -220,8 +220,11 @@ def _activate(case: Case, rt: Runtime) -> Case:
             for f in booked:
                 label = patient_label(f.action)
                 when = datetime.fromisoformat(f.appointment).strftime("%a %b %d at %I:%M %p")
-                parts.append(f"{label} on {when}")
-            text = f"We've booked: {'; '.join(parts)}. Reply OK to confirm or RESCHEDULE. - your care team"
+                parts.append(f"{label} on {when}" + (f" at {f.site}" if f.site else ""))
+            late = [patient_label(f.action) for f in booked if f.waitlisted]
+            wait = (f" Your {' and '.join(late)} {'is' if len(late) == 1 else 'are'} later than we'd like, so you're on "
+                    "the cancellation list: we'll text you the moment an earlier slot opens." if late else "")
+            text = f"We've booked: {'; '.join(parts)}.{wait} Reply OK to confirm or RESCHEDULE. - your care team"
             rt.messenger.send("patient", case.patient.patient_id, text)
             case.messages.append(Message(to="patient", tier="serious", text=text, at=rt.clock.iso()))
     case.state = CaseState.ACTIVE

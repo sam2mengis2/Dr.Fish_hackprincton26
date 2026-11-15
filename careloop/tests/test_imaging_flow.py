@@ -151,7 +151,7 @@ def test_scanner_backlog_never_delays_clinic_visits_or_takes_their_offers(tmp_pa
     rt = _busy_maria(tmp_path)
     c = rt.store.get("P-002")
     # the real model's plan for a growing nodule also includes a specialist visit, due soon
-    planner._add(c, "Pulmonology referral", "2026-12-01", "Top candidate next test; urgent", [], urgent=True)
+    planner._add(c, "Pulmonology referral", "2026-12-01", "Top candidate next test; urgent", [])
     scheduler.book_all(c, rt)
     rt.store.save(c)
     visit = next(f for f in c.followups if "pulmonology" in f.action.lower())
@@ -219,3 +219,82 @@ def test_deep_agent_gets_one_redo_and_guideline_tool_sees_growth(tmp_path):
     assert c.state.value == "verify_failed"                  # one redo allowed
     c = verifier.run(c, rt)
     assert c.state.value == "needs_human_review"             # not a third multi-minute investigation
+
+
+def test_ai_urgency_keeps_guideline_date_and_never_books_invasive_procedures(tmp_path):
+    from careloop.agents import planner, scheduler
+    from careloop.schema import CaseState, DxCandidate
+
+    rt = _rt(tmp_path)
+    service.import_outside_record(rt, P("P-002"), S("CT-P002-0"))
+    c = service.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    nod = next(f for f in c.findings if f.scan_id == "CT-P002-1" and f.finding == "lung nodule")
+    c.urgency, c.state = "urgent", CaseState.VERIFIED
+    c.differential = [DxCandidate(rank=1, dx="Primary lung malignancy", likelihood="moderate",
+                                  evidence_for=[nod.finding_id],
+                                  next_tests=["Short-interval chest CT", "PET-CT", "CT-guided biopsy"])]
+    c = planner.run(c, rt)
+    ct = next(f for f in c.followups if "chest ct" in f.action.lower())
+    assert ct.due == "2027-02-11"                                   # guideline date, not the urgent window
+    pet = next(f for f in c.followups if "pet" in f.action.lower())
+    assert pet.due == "2026-11-28"                                  # extra AI test: within 2 weeks
+    bx = next(f for f in c.followups if "biops" in f.action.lower())
+    assert bx.action.startswith("Discuss") and "clinician decision, never auto-booked" in bx.rule
+    scheduler.book_all(c, rt)
+    assert bx.appointment is None and ct.appointment and pet.appointment
+
+
+def test_followup_scan_text_says_loop_closed(tmp_path):
+    rt = _rt(tmp_path)
+    service.import_outside_record(rt, P("P-002"), S("CT-P002-0"))
+    service.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    c, _ = service.doctor_reply(rt, "P-002", "APPROVE")
+    ct = next(f for f in c.followups if "chest ct" in f.action.lower())
+    rt.clock.set(ct.appointment)
+    follow = S("CT-P002-2")
+    follow.date = ct.appointment[:10]
+    c = service.submit_scan(rt, P("P-002"), follow)
+    doc = [m.text for m in c.messages if m.to == "doctor"][-1]
+    assert "Follow-up done:" in doc and "stable at 7 mm" in doc
+
+
+def test_serious_tier_booking_text_has_hospital_and_cancellation_list(tmp_path, monkeypatch):
+    from careloop.agents import planner
+
+    rt = _rt(tmp_path)
+    service.seed_busy_scanners(rt, DATA)
+    service.import_outside_record(rt, P("P-002"), S("CT-P002-0"))
+    real_run = planner.run
+
+    def serious(case, rt):
+        case = real_run(case, rt)
+        case.message_tier = "serious"   # e.g. the real model ranks malignancy first
+        return case
+    monkeypatch.setattr(planner, "run", serious)
+    import careloop.graph as g
+    monkeypatch.setattr(g, "planner", planner, raising=False)
+    service.submit_scan(rt, P("P-002"), S("CT-P002-1"))
+    c, _ = service.doctor_reply(rt, "P-002", "APPROVE")
+    booked = [m.text for m in c.messages if m.to == "patient" and m.text.startswith("We've booked")]
+    assert c.message_tier == "serious"
+    assert booked and "Riverside Medical Center" in booked[-1] and "cancellation list" in booked[-1]
+
+
+def test_demo_time_skip_only_moves_this_patient(tmp_path):
+    from fastapi.testclient import TestClient
+
+    import api
+    from careloop.runtime import CaseStore
+
+    api.rt.store = CaseStore(tmp_path)
+    c = TestClient(api.app)
+    c.post("/reset")
+    c.post("/demo/busy")
+    for pid in ("P-004", "P-002", "P-002"):
+        c.post(f"/demo/load/{pid}")
+    c.post("/reply/doctor", json={"patient_id": "P-002", "text": "APPROVE"})
+    c.post("/demo/load/P-002")                         # follow-up CT: time skip to the appointment
+    grace = c.get("/cases/P-004").json()
+    assert not [m for m in grace["messages"] if "overdue" in m["text"].lower()]   # untouched patient stays quiet
+    maria = c.get("/cases/P-002").json()
+    assert any(f["status"] == "completed" and f["completed_by_scan"] == "CT-P002-2" for f in maria["followups"])
